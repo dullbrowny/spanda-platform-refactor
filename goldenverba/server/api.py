@@ -479,10 +479,10 @@ async def delete_document(payload: GetDocumentPayload):
     manager.delete_document_by_id(payload.document_id)
     return JSONResponse(content={})
 
-#for Ollama AQG
-@app.post("/api/ollamaAQG")
-async def ollamaAQG(queryPayload: QueryPayload):
-  variants =  ollama_aqg.main(queryPayload)
-  return JSONResponse(content={
-      "variants":variants,
-  })
+# #for Ollama AQG
+# @app.post("/api/ollamaAQG")
+# async def ollamaAQG(queryPayload: QueryPayload):
+# #   variants =  ollama_aqg.main(queryPayload)
+#   return JSONResponse(content={
+#       "variants":'1',
+#   })

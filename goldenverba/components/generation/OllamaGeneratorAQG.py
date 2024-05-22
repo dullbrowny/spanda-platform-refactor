@@ -84,13 +84,15 @@ class OllamaGeneratorAQG(Generator):
         Each message in the list is a dictionary with 'role' and 'content' keys, where 'role' is either 'system' or 'user', and 'content' contains the relevant text. This will depend on the LLM used.
         """
         base_question_gen = """
-            As an inventive educator dedicated to nurturing critical thinking skills, your task is to devise a series of a number of distinct iterations of a mathematical problem or a textual problem. Each iteration should be rooted in a fundamental problem-solving technique, but feature diverse numerical parameters and creatively reworded text to discourage students from sharing answers. Your objective is to generate a collection of unique questions that not only promote critical thinking but also thwart easy duplication of solutions. Ensure that each variant presents different numerical values, yielding disparate outcomes. Each question should have its noun labels changed. Additionally, each question should stand alone without requiring reference to any other question, although they may share the same solving concept. Your ultimate aim is to fashion an innovative array of challenges that captivate students and inspire analytical engagement.
+            You are an inventive educator dedicated to nurturing critical thinking skills, your task is to devise a series of a number of distinct iterations of a mathematical problem or a textual problem. Each iteration should be rooted in a fundamental problem-solving technique, but feature diverse numerical parameters and creatively reworded text to discourage students from sharing answers. Your objective is to generate a collection of unique questions that not only promote critical thinking but also thwart easy duplication of solutions. Ensure that each variant presents different numerical values, yielding disparate outcomes. Each question should have its noun labels changed. Additionally, each question should stand alone without requiring reference to any other question, although they may share the same solving concept. Your ultimate aim is to fashion an innovative array of challenges that captivate students and inspire analytical engagement.
             
-            Examples(I will provide example input prompts and expected responses):
+            Strictly follow the following format while providing variants of questions -
+            generated_question_variants-
+            (all variants generated with proper labelling)
 
+            Examples(I will provide example input prompts and expected responses):
             *Example 1 (Textual):*
             Please generate 3 variants of the question: What is the capital of France?
-
             generated_question_variants-
             1:In which European country is Paris located?
             2:What is the capital of Italy?
@@ -99,7 +101,6 @@ class OllamaGeneratorAQG(Generator):
 
             *Example 2 (Math):*
             Please generate 5 variants of the question: "What is the perimeter of a square if each side measures 5 centimeters?"
-    
             generated_question_variants-
             1. "Find the total length of a rectangle's border if its width is 3 meters and its height is 4 meters."
             2. "Determine the circumference of a circle with a radius of 7 millimeters."
@@ -107,7 +108,6 @@ class OllamaGeneratorAQG(Generator):
             4. "What is the total distance around a polygon with four sides, where one side measures 9 feet and another side measures 12 feet?"
             5. "Discover the perimeter of a rhombus if its diagonal measures 15 centimeters."
             -These are practice problems for basic geometry.
-
             Explanation: The generated questions are similar to the originals but rephrased using different wording or focusing on a different aspect of the problem (area vs. perimeter, speed vs. time).
         """
         messages = [

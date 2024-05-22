@@ -83,10 +83,9 @@ class OllamaGeneratorAGA(Generator):
 
         Each message in the list is a dictionary with 'role' and 'content' keys, where 'role' is either 'system' or 'user', and 'content' contains the relevant text. This will depend on the LLM used.
         """
-        user_context = " ".join(context)
-        rubric_content = f"""Please act as an impartial judge and evaluate the quality of the provided answer which attempts to answer the provided question based on a provided context.
+
+        rubric_content = """Please act as an impartial judge and evaluate the quality of the provided answer which attempts to answer the provided question based on a provided context.
             You'll be given context, question and answer to submit your reasoning and score for the correctness, comprehensiveness and readability of the answer. 
-            Use the user context:'{user_context}' to determine the grades for the different parameters.
 
             Below is your grading rubric: 
             - Correctness: If the answer correctly answer the question, below are the details for different scores:
@@ -184,12 +183,14 @@ class OllamaGeneratorAGA(Generator):
         for message in conversation:
             messages.append({"role": message.type, "content": message.content})
 
+
+        user_context = " ".join(context)
         query = " ".join(queries)
 
         messages.append(
             {
                 "role": "user",
-                "content": f"With this provided context: '{user_context}' Please grade the following question-answer pair: '{query}'",
+                "content": f"Please grade the following question-answer pair: '{query}', With this provided context: '{user_context}' ",
             }
         )
 
