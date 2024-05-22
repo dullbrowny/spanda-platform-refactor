@@ -170,12 +170,12 @@ async def instructor_eval(instructor_name, context):
     # Return the response content
     return response['message']['content']
 
-# Example usage
-async def main():
-    query = "Dr. Rishabh Sahai"
-    context = await make_request(query)
-    result = await instructor_eval(query, context)
-    print(result)
+# # Example usage
+# async def main():
+#     query = "Dr. Rishabh Sahai"
+#     context = await make_request(query)
+#     result = await instructor_eval(query, context)
+#     print(result)
 
-# Run the async main function
-asyncio.run(main())
+# # Run the async main function
+# asyncio.run(main())
