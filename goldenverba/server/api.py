@@ -10,7 +10,11 @@ from dotenv import load_dotenv
 from starlette.websockets import WebSocketDisconnect
 from wasabi import msg  # type: ignore[import]
 import time
-
+from goldenverba.server.bitsp import(
+    ollama_afe,
+    ollama_aga,
+    ollama_aqg
+)
 from goldenverba import verba_manager
 from goldenverba.server.types import (
     ResetPayload,
@@ -474,3 +478,11 @@ async def delete_document(payload: GetDocumentPayload):
 
     manager.delete_document_by_id(payload.document_id)
     return JSONResponse(content={})
+
+#for Ollama AQG
+@app.post("/api/ollamaAQG")
+async def ollamaAQG(queryPayload: QueryPayload):
+  variants =  ollama_aqg.main(queryPayload)
+  return JSONResponse(content={
+      "variants":variants,
+  })

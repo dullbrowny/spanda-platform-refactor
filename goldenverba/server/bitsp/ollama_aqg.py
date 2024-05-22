@@ -1,32 +1,34 @@
 import ollama
 import httpx
 import asyncio
+from goldenverba.server import api
 
 async def make_request(query):
-    async with httpx.AsyncClient(timeout=None) as client:  # Set timeout to None to wait indefinitely
-        # Define the endpoint URL
-        query_url = "http://localhost:8000/api/query"
+    return api.query(query)
+    # async with httpx.AsyncClient(timeout=None) as client:  # Set timeout to None to wait indefinitely
+    #     # Define the endpoint URL
+    #     query_url = "http://localhost:8000/api/query"
 
-        # Define the payload
-        payload = {
-            "query": query
-        }
+    #     # Define the payload
+    #     payload = {
+    #         "query": query
+    #     }
 
-        try:
-            # Make a POST request to the /api/query endpoint
-            response_query = await client.post(query_url, json=payload)
-            if response_query.status_code == 200:
-                response_data = response_query.json()
-                print("Successfully retrieved context!")
-                return response_data.get("context", "No context provided")
-            else:
-                print(f"Query Request failed with status code {response_query.status_code}")
-                return None
-        except httpx.RequestError as exc:
-            print(f"An error occurred while requesting {exc.request.url!r}: {exc}")
-            return None
+    #     try:
+    #         # Make a POST request to the /api/query endpoint
+    #         response_query = await client.post(query_url, json=payload)
+    #         if response_query.status_code == 200:
+    #             response_data = response_query.json()
+    #             print("Successfully retrieved context!")
+    #             return response_data.get("context", "No context provided")
+    #         else:
+    #             print(f"Query Request failed with status code {response_query.status_code}")
+    #             return None
+    #     except httpx.RequestError as exc:
+    #         print(f"An error occurred while requesting {exc.request.url!r}: {exc}")
+    #         return None
 
-async def generate_question_variants(base_question, n, context):
+async def generate_question_variants(base_question, context):
     # Join the context into a single string
     user_context = " ".join(context)
 
@@ -79,7 +81,7 @@ async def generate_question_variants(base_question, n, context):
             },
             {
                 "role": "user",
-                "content": f"Please generate {n} variants of the question: '{base_question}'",
+                "content": base_question, #f"Please generate  variants of the question: '{base_question}'",
             }
         ],
         "stream": False,
@@ -103,12 +105,13 @@ async def generate_question_variants(base_question, n, context):
     return response['message']['content']
 
 # Example usage
-async def main():
-    query = "What is the area of a rectangle with length 10 units and width 5 units?"
+async def main(query):
+    #query = "What is the area of a rectangle with length 10 units and width 5 units?"
     context = await make_request(query)
     n = 7
-    variants = await generate_question_variants(query, n, context)
+    variants = await generate_question_variants(query, context)
     print(variants)
+    return variants
 
 # Run the async main function
 asyncio.run(main())
