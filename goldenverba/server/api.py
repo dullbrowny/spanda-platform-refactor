@@ -2,6 +2,9 @@ from fastapi import FastAPI, WebSocket, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from ollama import chat as ollama_chat
+from httpx import AsyncClient
+import asyncio
 
 import os
 from pathlib import Path
@@ -25,6 +28,7 @@ from goldenverba.server.types import (
     GetDocumentPayload,
     SearchQueryPayload,
     ImportPayload,
+    QueryRequest
 )
 from goldenverba.server.util import get_config, set_config, setup_managers
 logger = logging.getLogger("API")
@@ -480,17 +484,129 @@ async def delete_document(payload: GetDocumentPayload):
     manager.delete_document_by_id(payload.document_id)
     return JSONResponse(content={})
 
-#for Ollama AQG
-@app.post("/api/ollamaAQG")
-async def ollamaAQG(queryPayload: QueryPayload):
-#   variants =  ollama_aqg.main(queryPayload)
-    print(queryPayload.query)
-    context = await ollama_aqg.make_request(queryPayload.query)
-    print(context)
-    variants = await ollama_aqg.generate_question_variants(queryPayload.query,context)
-    logging.debug(context)
-    logging.debug(variants)
-    return JSONResponse(content=
-                        {
-                            "variants":variants,
-                        })
+#for Ollama AGA
+async def make_request(query):
+    async with AsyncClient(timeout=None) as client:
+        query_url = "http://localhost:8000/api/query"
+        payload = {"query": query}
+        try:
+            response_query = await client.post(query_url, json=payload)
+            if response_query.status_code == 200:
+                response_data = response_query.json()
+                return response_data.get("context", "No context provided")
+            else:
+                return None
+        except Exception as exc:
+            print(f"An error occurred: {exc}")
+            return None
+
+async def grading_assistant(question_answer_pair, context):
+    user_context = " ".join(context)
+    rubric_content = f"""Please act as an impartial judge and evaluate the quality of the provided answer which attempts to answer the provided question based on a provided context.
+            You'll be given context, question and answer to submit your reasoning and score for the correctness, comprehensiveness and readability of the answer. 
+            Here is the context - {user_context}
+
+            Below is your grading rubric: 
+            - Correctness: If the answer correctly answers the question, below are the details for different scores:
+            - Score 0: the answer is completely incorrect, doesn't mention anything about the question or is completely contrary to the correct answer.
+                - For example, when asked “How to terminate a databricks cluster”, the answer is an empty string, or content that's completely irrelevant, or sorry I don't know the answer.
+            - Score 1: the answer provides some relevance to the question and answers one aspect of the question correctly.
+                - Example:
+                    - Question: How to terminate a databricks cluster
+                    - Answer: Databricks cluster is a cloud-based computing environment that allows users to process big data and run distributed data processing tasks efficiently.
+                    - Or answer:  In the Databricks workspace, navigate to the "Clusters" tab. And then this is a hard question that I need to think more about it
+            - Score 2: the answer mostly answers the question but is missing or hallucinating on one critical aspect.
+                - Example:
+                    - Question: How to terminate a databricks cluster”
+                    - Answer: “In the Databricks workspace, navigate to the "Clusters" tab.
+                    Find the cluster you want to terminate from the list of active clusters.
+                    And then you'll find a button to terminate all clusters at once”
+            - Score 3: the answer correctly answers the question and is not missing any major aspect. In this case, to score correctness 3, the final answer must be correct, final solution for numerical problems is of utmost importance.
+                - Example:
+                    - Question: How to terminate a databricks cluster
+                    - Answer: In the Databricks workspace, navigate to the "Clusters" tab.
+                    Find the cluster you want to terminate from the list of active clusters.
+                    Click on the down-arrow next to the cluster name to open the cluster details.
+                    Click on the "Terminate" button. A confirmation dialog will appear. Click "Terminate" again to confirm the action.”
+            - Comprehensiveness: How comprehensive is the answer, does it fully answer all aspects of the question and provide comprehensive explanation and other necessary information. Below are the details for different scores:
+            - Score 0: typically if the answer is completely incorrect, then the comprehensiveness is also zero.
+            - Score 1: if the answer is correct but too short to fully answer the question, then we can give score 1 for comprehensiveness.
+                - Example:
+                    - Question: How to use databricks API to create a cluster?
+                    - Answer: First, you will need a Databricks access token with the appropriate permissions. You can generate this token through the Databricks UI under the 'User Settings' option. And then (the rest is missing)
+            - Score 2: the answer is correct and roughly answers the main aspects of the question, but it's missing description about details. Or is completely missing details about one minor aspect.
+                - Example:
+                    - Question: How to use databricks API to create a cluster?
+                    - Answer: You will need a Databricks access token with the appropriate permissions. Then you'll need to set up the request URL, then you can make the HTTP Request. Then you can handle the request response.
+                - Example:
+                    - Question: How to use databricks API to create a cluster?
+                    - Answer: You will need a Databricks access token with the appropriate permissions. Then you'll need to set up the request URL, then you can make the HTTP Request. Then you can handle the request response.
+            - Score 3: the answer is correct, and covers all the main aspects of the question
+            - Readability: How readable is the answer, does it have redundant information or incomplete information that hurts the readability of the answer.
+            - Score 0: the answer is completely unreadable, e.g. full of symbols that's hard to read; e.g. keeps repeating the words that it's very hard to understand the meaning of the paragraph. No meaningful information can be extracted from the answer.
+            - Score 1: the answer is slightly readable, there are irrelevant symbols or repeated words, but it can roughly form a meaningful sentence that covers some aspects of the answer.
+                - Example:
+                    - Question: How to use databricks API to create a cluster?
+                    - Answer: You you  you  you  you  you  will need a Databricks access token with the appropriate permissions. And then then you'll need to set up the request URL, then you can make the HTTP Request. Then Then Then Then Then Then Then Then Then
+            - Score 2: the answer is correct and mostly readable, but there is one obvious piece that's affecting the readability (mentioning of irrelevant pieces, repeated words)
+                - Example:
+                    - Question: How to terminate a databricks cluster
+                    - Answer: In the Databricks workspace, navigate to the "Clusters" tab.
+                    Find the cluster you want to terminate from the list of active clusters.
+                    Click on the down-arrow next to the cluster name to open the cluster details.
+                    Click on the "Terminate" button…………………………………..
+                    A confirmation dialog will appear. Click "Terminate" again to confirm the action.
+            - Score 3: the answer is correct and reader friendly, no obvious piece that affect readability.
+            - Then final rating:
+                - Ratio: 60'%' correctness + 20'%' comprehensiveness + 20'%' readability 
+                - Example 1 of a final rating - 
+                    Overall Score:
+                        Correctness: 3
+                        Comprehensiveness: 2
+                        Readability: 2
+                        Final Score = 60'%' of 3(correctness score) + 20'%' of 2(Comprehensiveness score) + 20'%' of 2(Readability score)
+                                    = 1.8 + 0.4 + 0.4 = 2.6/3
+                - Example 2 of a final rating -
+                    Overall Score:
+                        Correctness: 3
+                        Comprehensiveness: 3
+                        Readability: 3
+                        Final Score = 60'%' of 3(correctness score) + 20'%' of 3(Comprehensiveness score) + 20'%' of 3(Readability score)
+                                    = 1.8 + 0.6 + 0.6 = 3/3
+            
+            The format in which you should provide results-
+                Correctness:
+                    -Score(scale of 0 to 3)
+                    -Explanation of score
+                Readability:
+                    -Score(scale of 0 to 3)
+                    -Explanation of score
+                Comprehensiveness:
+                    -Score(scale of 0 to 3)
+                    -Explanation of score
+                
+                Overall Score:
+                    - Then final rating:
+                        - Ratio: 60'%' correctness + 20'%' comprehensiveness + 20'%' readability 
+                        Strictly follow this ratio of grading.
+                            """
+    payload = {
+        "messages": [
+            {"role": "system", "content": rubric_content},
+            {"role": "user", "content": f"""Grade the following question-answer pair using the grading rubric and context provided - {question_answer_pair}"""}
+        ],
+        "stream": False,
+        "options": {"top_k": 1, "top_p": 0, "temperature": 0, "seed": 100}
+    }
+
+    response = await asyncio.to_thread(ollama_chat, model='llama3', messages=payload['messages'], stream=payload['stream'])
+    return response['message']['content']
+
+@app.post("/api/ollamaAGA")
+async def ollama_aqg(request: QueryRequest):
+    query = request.query
+    context = await make_request(query)
+    if context is None:
+        raise HTTPException(status_code=500, detail="Failed to fetch context")
+    variants = await grading_assistant(query, context)
+    return {"variants": variants}
