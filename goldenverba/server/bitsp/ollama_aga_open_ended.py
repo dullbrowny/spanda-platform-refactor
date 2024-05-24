@@ -30,7 +30,6 @@ async def make_request(query):
 async def grading_assistant(question_answer_pair, context):
     print(context)
     user_context = " ".join(context)
-    answer_key = "The Turing Test: A Benchmark for Artificial Intelligence and a Redefinition of Intelligence Itself - The Turing Test stands as a landmark in the quest to understand artificial intelligence. It proposes a clear and thought-provoking criterion: if a machine can carry on a conversation indistinguishable from a human, then it can be considered intelligent. This simple yet profound idea challenges our very definition of intelligence. By forcing us to consider conversation as a key marker of intelligence, the Turing Test becomes a valuable benchmark for measuring progress in AI."
     rubric_content = f"""Please act as an impartial judge and evaluate the quality of the provided answer which attempts to answer the provided question based on a provided context.
             You'll be given context, question and answer to submit your reasoning and score for the correctness, comprehensiveness and readability of the answer. 
 
