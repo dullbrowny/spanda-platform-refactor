@@ -85,13 +85,13 @@ async def generate_question_variants(base_question, n, context):
     # Return the response content
     return response['message']['content']
 
-# Example usage
-async def main():
-    query = "What is the area of a rectangle with length 10 units and width 5 units?"
-    context = await make_request(query)
-    n = 7
-    variants = await generate_question_variants(query, n, context)
-    print(variants)
+# # Example usage
+# async def main():
+#     query = "What is the area of a rectangle with length 10 units and width 5 units?"
+#     context = await make_request(query)
+#     n = 7
+#     variants = await generate_question_variants(query, n, context)
+#     print(variants)
 
-# Run the async main function
-asyncio.run(main())
+# # Run the async main function
+# asyncio.run(main())
