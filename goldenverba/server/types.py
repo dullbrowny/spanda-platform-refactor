@@ -49,6 +49,8 @@ class ImportPayload(BaseModel):
     textValues: list[str]
     config: dict
 
+class QueryRequest(BaseModel):
+    query: str
 
 class ConfigPayload(BaseModel):
     config: dict
