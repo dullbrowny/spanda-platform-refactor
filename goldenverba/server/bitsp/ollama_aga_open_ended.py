@@ -153,12 +153,12 @@ async def grading_assistant(question_answer_pair, context):
     return response['message']['content']
 
 
-# Example usage
-async def main():
-    query = "Q: What is the significance of the Turing Test in the field of artificial intelligence? A: The Turing Test is significant because it proposes a criterion for determining whether a computer is capable of exhibiting intelligent behavior equivalent to, or indistinguishable from, that of a human. It challenges the notion of what it means to be intelligent and serves as a benchmark for evaluating AI capabilities."
-    context = await make_request(query)
-    variants = await grading_assistant(query, context)
-    print(variants)
+# # Example usage
+# async def main():
+#     query = "Q: What is the significance of the Turing Test in the field of artificial intelligence? A: The Turing Test is significant because it proposes a criterion for determining whether a computer is capable of exhibiting intelligent behavior equivalent to, or indistinguishable from, that of a human. It challenges the notion of what it means to be intelligent and serves as a benchmark for evaluating AI capabilities."
+#     context = await make_request(query)
+#     variants = await grading_assistant(query, context)
+#     print(variants)
 
-# Run the async main function
-asyncio.run(main())
+# # Run the async main function
+# asyncio.run(main())
