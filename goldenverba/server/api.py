@@ -15,6 +15,7 @@ from goldenverba.server.bitsp import(
     ollama_aga,
     ollama_aqg
 )
+import logging
 from goldenverba import verba_manager
 from goldenverba.server.types import (
     ResetPayload,
@@ -26,7 +27,7 @@ from goldenverba.server.types import (
     ImportPayload,
 )
 from goldenverba.server.util import get_config, set_config, setup_managers
-
+logger = logging.getLogger("API")
 load_dotenv()
 
 # Check if runs in production
@@ -479,10 +480,17 @@ async def delete_document(payload: GetDocumentPayload):
     manager.delete_document_by_id(payload.document_id)
     return JSONResponse(content={})
 
-# #for Ollama AQG
-# @app.post("/api/ollamaAQG")
-# async def ollamaAQG(queryPayload: QueryPayload):
-# #   variants =  ollama_aqg.main(queryPayload)
-#   return JSONResponse(content={
-#       "variants":'1',
-#   })
+#for Ollama AQG
+@app.post("/api/ollamaAQG")
+async def ollamaAQG(queryPayload: QueryPayload):
+#   variants =  ollama_aqg.main(queryPayload)
+    print(queryPayload.query)
+    context = await ollama_aqg.make_request(queryPayload.query)
+    print(context)
+    variants = await ollama_aqg.generate_question_variants(queryPayload.query,context)
+    logging.debug(context)
+    logging.debug(variants)
+    return JSONResponse(content=
+                        {
+                            "variants":variants,
+                        })
