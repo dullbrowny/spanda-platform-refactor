@@ -30,11 +30,19 @@ async def generate_question_variants(base_question, n, context):
     # Join the context into a single string
     user_context = " ".join(context)
 
-    base_question = """
+    base_question_gen = """
             As an inventive educator dedicated to nurturing critical thinking skills, your task is to devise a series of a number of distinct iterations of a mathematical problem or a textual problem. Each iteration should be rooted in a fundamental problem-solving technique, but feature diverse numerical parameters and creatively reworded text to discourage students from sharing answers. Your objective is to generate a collection of unique questions that not only promote critical thinking but also thwart easy duplication of solutions. Ensure that each variant presents different numerical values, yielding disparate outcomes. Each question should have its noun labels changed. Additionally, each question should stand alone without requiring reference to any other question, although they may share the same solving concept. Your ultimate aim is to fashion an innovative array of challenges that captivate students and inspire analytical engagement.
             
-            Examples(I will provide example input prompts and expected responses):
+            Strictly follow the format for your responses:
+            generated_question_variants:
+            1:Variant 1
+            2:Variant 2
+            3:Variant 3
+            ..
+            ..
+            n:Variant n
 
+            -Few-shot examples-
             *Example 1 (Textual):*
             Please generate 3 variants of the question: What is the capital of France?
 
@@ -63,7 +71,7 @@ async def generate_question_variants(base_question, n, context):
         "messages": [
             {
                 "role": "system",
-                "content": base_question
+                "content": base_question_gen
             },
             {
                 "role": "user",
@@ -80,7 +88,7 @@ async def generate_question_variants(base_question, n, context):
     }
 
     # Asynchronous call to Ollama API
-    response = await asyncio.to_thread(ollama.chat, model='zephyr', messages=payload['messages'], stream=payload['stream'])
+    response = await asyncio.to_thread(ollama.chat, model='llama3', messages=payload['messages'], stream=payload['stream'])
 
     # Return the response content
     return response['message']['content']
