@@ -494,6 +494,10 @@ class VerbaManager:
                 self.generator_manager.selected_generator
             ],
         )
+        # print("query" + queries)
+        # print("Context:" + context)
+        # print("CHUNKS:" + chunks)
+        print("test2")
         return chunks, context
 
     def retrieve_all_documents(self, doc_type: str, page: int, pageSize: int) -> list:

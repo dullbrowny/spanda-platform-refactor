@@ -5,6 +5,7 @@ from fastapi.staticfiles import StaticFiles
 from ollama import chat as ollama_chat
 from httpx import AsyncClient
 import asyncio
+import json
 
 import os
 from pathlib import Path
@@ -297,6 +298,7 @@ async def query(payload: QueryPayload):
     msg.good(f"Received query: {payload.query}")
     start_time = time.time()  # Start timing
     try:
+        print("test1")
         chunks, context = manager.retrieve_chunks([payload.query])
 
         retrieved_chunks = [
@@ -310,7 +312,7 @@ async def query(payload: QueryPayload):
             }
             for chunk in chunks
         ]
-
+        print(retrieved_chunks)
         elapsed_time = round(time.time() - start_time, 2)  # Calculate elapsed time
         msg.good(f"Succesfully processed query: {payload.query} in {elapsed_time}s")
 
@@ -485,23 +487,22 @@ async def delete_document(payload: GetDocumentPayload):
     return JSONResponse(content={})
 
 #for Ollama AGA
-async def make_request(query):
-    async with AsyncClient(timeout=None) as client:
-        query_url = "http://localhost:8000/api/query"
-        payload = {"query": query}
-        try:
-            response_query = await client.post(query_url, json=payload)
-            if response_query.status_code == 200:
-                response_data = response_query.json()
-                return response_data.get("context", "No context provided")
-            else:
-                return None
-        except Exception as exc:
-            print(f"An error occurred: {exc}")
-            return None
+async def make_request(query_user):
+    # Escape the query to handle special characters and newlines
+    formatted_query = json.dumps(query_user)
+
+    # Create a payload with the formatted query
+    payload = QueryPayload(query=formatted_query)
+
+    # Retrieve chunks and context
+    chunks, context = manager.retrieve_chunks([payload.query])
+
+    return context
+
 
 async def grading_assistant(question_answer_pair, context):
     user_context = " ".join(context)
+    print(context)
     rubric_content = f"""Please act as an impartial judge and evaluate the quality of the provided answer which attempts to answer the provided question based on a provided context.
             You'll be given context, question and answer to submit your reasoning and score for the correctness, comprehensiveness and readability of the answer. 
             Here is the context - {user_context}
