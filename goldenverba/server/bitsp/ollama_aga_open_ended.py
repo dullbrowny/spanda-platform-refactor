@@ -30,7 +30,8 @@ async def make_request(query):
 async def grading_assistant(question_answer_pair, context):
     print(context)
     user_context = " ".join(context)
-    rubric_content = f"""Please act as an impartial judge and evaluate the quality of the provided answer which attempts to answer the provided question based on a provided context.
+    # answer_key = "The Turing Test: A Benchmark for Artificial Intelligence and a Redefinition of Intelligence Itself - The Turing Test stands as a landmark in the quest to understand artificial intelligence. It proposes a clear and thought-provoking criterion: if a machine can carry on a conversation indistinguishable from a human, then it can be considered intelligent. This simple yet profound idea challenges our very definition of intelligence. By forcing us to consider conversation as a key marker of intelligence, the Turing Test becomes a valuable benchmark for measuring progress in AI."
+    rubric_content = f"""<s> [INST] Please act as an impartial judge and evaluate the quality of the provided answer which attempts to answer the provided question based on a provided context.
             You'll be given context, question and answer to submit your reasoning and score for the correctness, comprehensiveness and readability of the answer. 
 
             Here is the context - 
@@ -139,7 +140,7 @@ async def grading_assistant(question_answer_pair, context):
         "stream": False,
         "options": {
             "top_k": 1, 
-            "top_p": 0, 
+            "top_p": 1, 
             "temperature": 0, 
             "seed": 100, 
         }
@@ -151,6 +152,32 @@ async def grading_assistant(question_answer_pair, context):
     # Return the response content
     return response['message']['content']
 
+async def query_to_context_match(query, context):
+    # Join the context into a single string
+    user_context = " ".join(context)
+
+    context_query_match = "<s> [INST] You are an expert Google searcher, whose job is to determine if the following document is relevant to the query (true/false). Answer using only one word, one of those two choices.[/INST]"
+
+    # Define the payload for Ollama
+    payload = {
+        "messages": [
+            {
+                "role": "system",
+                "content": context_query_match
+            },
+            {
+                "role": "user",
+                "content": f"With this provided context: '{context}' Please look at this query: '{query}'.",
+            }
+        ],
+        "stream": False,
+        "options": {
+            "top_k": 1, 
+            "top_p": 1, 
+            "temperature": 0, 
+            "seed": 100, 
+        }
+    }
 
 # # Example usage
 # async def main():

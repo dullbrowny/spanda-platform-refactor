@@ -1,4 +1,4 @@
-from fastapi import FastAPI, WebSocket, status
+from fastapi import FastAPI, WebSocket, status, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -6,6 +6,8 @@ from ollama import chat as ollama_chat
 from httpx import AsyncClient
 import asyncio
 import json
+import httpx
+
 
 import os
 from pathlib import Path
@@ -55,6 +57,7 @@ origins = [
     "https://verba-golden-ragtriever.onrender.com",
     "http://localhost:8000",
     "http://localhost:1511",
+    "http://localhost:1511/courses/s24/sample/gradingAssistant",
 ]
 
 # Add middleware for handling Cross Origin Resource Sharing (CORS)
