@@ -307,6 +307,11 @@ class VerbaManager:
         else:
             self.environment_variables["OLLAMA_MODEL"] = False
 
+        if os.environ.get("OLLAMA_EMBED_MODEL", "") != "":
+            self.environment_variables["OLLAMA_EMBED_MODEL"] = True
+        else:
+            self.environment_variables["OLLAMA_EMBED_MODEL"] = False
+
         # OpenAI API Key
         if os.environ.get("OPENAI_API_KEY", "") != "":
             self.environment_variables["OPENAI_API_KEY"] = True
@@ -494,10 +499,6 @@ class VerbaManager:
                 self.generator_manager.selected_generator
             ],
         )
-        # print("query" + queries)
-        # print("Context:" + context)
-        # print("CHUNKS:" + chunks)
-        print("test2")
         return chunks, context
 
     def retrieve_all_documents(self, doc_type: str, page: int, pageSize: int) -> list:

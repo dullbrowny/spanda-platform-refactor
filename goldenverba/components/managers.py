@@ -31,9 +31,6 @@ from goldenverba.components.generation.CohereGenerator import CohereGenerator
 from goldenverba.components.generation.GPT3Generator import GPT3Generator
 from goldenverba.components.generation.GPT4Generator import GPT4Generator
 from goldenverba.components.generation.OllamaGenerator import OllamaGenerator
-from goldenverba.components.generation.OllamaGeneratorAFE import OllamaGeneratorAFE
-from goldenverba.components.generation.OllamaGeneratorAGA import OllamaGeneratorAGA
-from goldenverba.components.generation.OllamaGeneratorAQG import OllamaGeneratorAQG
 
 import time
 
@@ -272,9 +269,6 @@ class GeneratorManager:
             "GPT4-O": GPT4Generator(),
             "GPT3": GPT3Generator(),
             "Ollama": OllamaGenerator(),
-            "OllamaAGA": OllamaGeneratorAGA(),
-            "OllamaAQG": OllamaGeneratorAQG(),
-            "OllamaAFE": OllamaGeneratorAFE(),
             "Command R+": CohereGenerator(),
         }
         self.selected_generator: str = "GPT3"
