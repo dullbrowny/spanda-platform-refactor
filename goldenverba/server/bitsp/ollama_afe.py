@@ -52,10 +52,11 @@ async def instructor_eval(instructor_name, context, score_criterion):
                 "content": f"""
                 Here are your transcripts -
                 [TRANSCRIPT START]
-                    {context}
+                    {user_context}
                 [TRANSCRIPT END]
 
-                <s> [INST] You are tasked with evaluating a teacher's performance based solely on {score_criterion}. Your assessment should be derived from a provided video transcript, ignoring any interruptions caused by student entries or exits and any notifications of participants 'joining the meeting' or 'leaving the meeting.' Assign scores from 0 to 5, where 0 indicates poor performance and 5 indicates exceptional performance. 
+                <s> [INST] You are tasked with evaluating a teacher's performance based solely on {score_criterion}. 
+                Your assessment should be derived from a provided video transcript, ignoring any interruptions caused by student entries or exits and any notifications of participants 'joining the meeting' or 'leaving the meeting.' Assign scores from 0 to 3, where 0 indicates poor performance and 3 indicates exceptional performance. 
                 If the transcript lacks sufficient information to judge {score_criterion}, mark it as N/A and provide a clear explanation. If the score is not a perfect score, justify why. 
                 Please evaluate this instructor - {instructor_name}.
 
@@ -73,7 +74,7 @@ async def instructor_eval(instructor_name, context, score_criterion):
 
                 These examples must contain good examples and bad examples. If the score is not ideal, showcase bad examples too.
 
-                Rate on a scale of 0 to 5. Strictly follow this scale. Please use whole numbers.
+                Rate on a scale of 0 to 3. Strictly follow this scale. Please use whole numbers.
                 """
             }
         ],
@@ -81,13 +82,13 @@ async def instructor_eval(instructor_name, context, score_criterion):
         "options": {
             "top_k": 1, 
             "top_p": 1, 
-            "temperature": 0.0, 
+            "temperature": 0, 
             "seed": 100, 
         }
     }
 
     # Asynchronous call to the LLM API
-    response = await asyncio.to_thread(ollama.chat, model='llama3', messages=payload['messages'], stream=payload['stream'])
+    response = await asyncio.to_thread(ollama.chat, model='llama3-gradient', messages=payload['messages'], stream=payload['stream'])
 
     # Store the response
     responses[score_criterion] = response
@@ -107,31 +108,32 @@ async def instructor_eval(instructor_name, context, score_criterion):
 
 # # Example usage
 # async def main():
-#     dimensions = [
-#         "Communication Clarity",
-#         "Punctuality",
-#         "Positivity",
-#         "Personal Engagement",
-#         "Classroom Management Practices",
-#         "Adherence to Rules",
-#         "Classroom Atmosphere",
-#         "Student Participation"
-#     ]
+#     dimensions = {
+#         "Communication Clarity": "The ability to convey information and instructions clearly and effectively so that students can easily understand the material being taught.",
+#         "Punctuality": "Consistently starting and ending classes on time, as well as meeting deadlines for assignments and other class-related activities.",
+#         "Positivity": "Maintaining a positive attitude, providing encouragement, and fostering a supportive and optimistic learning environment.",
+#         "Personal Engagement": "Taking an active interest in each student's learning experience, addressing individual needs, and building meaningful connections with students.",
+#         "Classroom Management Practices": "Implementing strategies to maintain order, minimize disruptions, and ensure a productive and respectful classroom environment.",
+#         "Adherence to Rules": "Consistently following and enforcing classroom and school policies, ensuring that both the teacher and students abide by established guidelines.",
+#         "Classroom Atmosphere": "Creating a welcoming, inclusive, and comfortable environment that promotes learning and collaboration among students.",
+#         "Student Participation": "Encouraging and facilitating active involvement from all students in class discussions, activities, and assignments."
+#     }
+
 #     instructor_name = "NANDAGOPAL GOVINDAN"
 #     # instructor_name = "SANGVE SUNIL MAHADEV"
 #     # instructor_name = "ASHUTOSH BHATIA"
 
-
 #     all_responses = {}
 #     all_scores = {}
 
-#     for dimension in dimensions:
-#         query = f"Based on the following criteria: {dimension}, Please evaluate the following teacher: {instructor_name}. Only evaluate the particular criteria based on the transcript, do not evaluate other criteria."
+#     for dimension, explanation in dimensions.items():
+#         query = f"Based on the following criteria: {dimension} - {explanation}, Please evaluate the following teacher: {instructor_name}. Only evaluate the particular criteria based on the transcript, do not evaluate other criteria."
 #         context = await make_request(query)  # Assuming make_request is defined elsewhere to get the context
 #         print(f"CONTEXT for {dimension}:")
 #         print(context)  # Print the context generated
 #         result_responses, result_scores = await instructor_eval(instructor_name, context, dimension)
-        
+#         print(result_responses)
+#         print(result_scores)
 #         # Extract only the message['content'] part and store it
 #         all_responses[dimension] = result_responses[dimension]['message']['content']
 #         all_scores[dimension] = result_scores[dimension]
@@ -141,5 +143,5 @@ async def instructor_eval(instructor_name, context, score_criterion):
 #     print("SCORES:")
 #     print(json.dumps(all_scores, indent=2))     # Convert to JSON string for pretty printing
 
-# # Run the async main function
+# # Run the main function
 # asyncio.run(main())
