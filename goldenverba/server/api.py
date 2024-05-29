@@ -720,9 +720,11 @@ async def generate_question_variants(base_question, context):
     # Join the context into a single string
     user_context = " ".join(context)
 
-    base_question_gen = """
+    base_question_gen = f"""
             <s> [INST] As an inventive educator dedicated to nurturing critical thinking skills, your task is to devise a series of a number of distinct iterations of a mathematical problem or a textual problem. Each iteration should be rooted in a fundamental problem-solving technique, but feature diverse numerical parameters and creatively reworded text to discourage students from sharing answers. Your objective is to generate a collection of unique questions that not only promote critical thinking but also thwart easy duplication of solutions. Ensure that each variant presents different numerical values, yielding disparate outcomes. Each question should have its noun labels changed. Additionally, each question should stand alone without requiring reference to any other question, although they may share the same solving concept. Your ultimate aim is to fashion an innovative array of challenges that captivate students and inspire analytical engagement.
-            
+            Strictly ensure that the questions are relevant to the following context-
+            {context}
+
             Strictly follow the format for your responses:
             generated_question_variants:
             1:Variant 1
