@@ -507,9 +507,13 @@ async def make_request(query_user):
 async def grading_assistant(question_answer_pair, context):
     user_context = " ".join(context)
     print(context)
-    rubric_content = f"""Please act as an impartial judge and evaluate the quality of the provided answer which attempts to answer the provided question based on a provided context.
+    rubric_content = f"""<s> [INST] Please act as an impartial judge and evaluate the quality of the provided answer which attempts to answer the provided question based on a provided context.
             You'll be given context, question and answer to submit your reasoning and score for the correctness, comprehensiveness and readability of the answer. 
-            Here is the context - {user_context}
+
+            Here is the context - 
+            [CONTEXT START]
+            {user_context}. 
+            [CONTEXT START]
 
             Below is your grading rubric: 
             - Correctness: If the answer correctly answers the question, below are the details for different scores:
@@ -561,39 +565,17 @@ async def grading_assistant(question_answer_pair, context):
                     Click on the down-arrow next to the cluster name to open the cluster details.
                     Click on the "Terminate" button…………………………………..
                     A confirmation dialog will appear. Click "Terminate" again to confirm the action.
-            - Score 3: the answer is correct and reader friendly, no obvious piece that affect readability.
-            - Then final rating:
-                - Ratio: 60'%' correctness + 20'%' comprehensiveness + 20'%' readability 
-                - Example 1 of a final rating - 
-                    Overall Score:
-                        Correctness: 3
-                        Comprehensiveness: 2
-                        Readability: 2
-                        Final Score = 60'%' of 3(correctness score) + 20'%' of 2(Comprehensiveness score) + 20'%' of 2(Readability score)
-                                    = 1.8 + 0.4 + 0.4 = 2.6/3
-                - Example 2 of a final rating -
-                    Overall Score:
-                        Correctness: 3
-                        Comprehensiveness: 3
-                        Readability: 3
-                        Final Score = 60'%' of 3(correctness score) + 20'%' of 3(Comprehensiveness score) + 20'%' of 3(Readability score)
-                                    = 1.8 + 0.6 + 0.6 = 3/3
-            
+            - Score 3: the answer is correct and reader friendly, no obvious piece that affect readability.          
             The format in which you should provide results-
                 Correctness:
-                    -Score(scale of 0 to 3)
+                    -Score
                     -Explanation of score
                 Readability:
-                    -Score(scale of 0 to 3)
+                    -Score
                     -Explanation of score
                 Comprehensiveness:
-                    -Score(scale of 0 to 3)
+                    -Score
                     -Explanation of score
-                
-                Overall Score:
-                    - Then final rating:
-                        - Ratio: 60'%' correctness + 20'%' comprehensiveness + 20'%' readability 
-                        Strictly follow this ratio of grading.
                             """
     payload = {
         "messages": [
@@ -601,11 +583,34 @@ async def grading_assistant(question_answer_pair, context):
             {"role": "user", "content": f"""Grade the following question-answer pair using the grading rubric and context provided - {question_answer_pair}"""}
         ],
         "stream": False,
-        "options": {"top_k": 1, "top_p": 0, "temperature": 0, "seed": 100}
+        "options": {"top_k": 1, "top_p": 1, "temperature": 0, "seed": 100}
     }
 
-    response = await asyncio.to_thread(ollama_chat, model='llama3', messages=payload['messages'], stream=payload['stream'])
-    return response['message']['content']
+    response = await asyncio.to_thread(ollama_chat, model='dolphin-llama3', messages=payload['messages'], stream=payload['stream'])
+    
+    # Define a dictionary to store extracted scores
+    scores_dict = {}
+
+    # Extract the response content
+    response_content = response['message']['content']
+
+    # Define the criteria to look for
+    criteria = ["Correctness", "Readability", "Comprehensiveness"]
+
+    # Iterate over each criterion
+    for criterion in criteria:
+        # Use regular expression to search for the criterion followed by 'Score:'
+        criterion_pattern = re.compile(rf'{criterion}:\s*-?\s*Score\s*(\d+)', re.IGNORECASE)
+        match = criterion_pattern.search(response_content)
+        if match:
+            # Extract the score value
+            score_value = match.group(1).strip()
+            scores_dict[criterion] = score_value
+        else:
+            scores_dict[criterion] = "N/A"
+
+
+    return response['message']['content'], scores_dict
 
 async def instructor_eval(instructor_name, context, score_criterion, explanation):
     # Define the criterion to evaluate
@@ -716,7 +721,7 @@ async def generate_question_variants(base_question, context):
     user_context = " ".join(context)
 
     base_question_gen = """
-            As an inventive educator dedicated to nurturing critical thinking skills, your task is to devise a series of a number of distinct iterations of a mathematical problem or a textual problem. Each iteration should be rooted in a fundamental problem-solving technique, but feature diverse numerical parameters and creatively reworded text to discourage students from sharing answers. Your objective is to generate a collection of unique questions that not only promote critical thinking but also thwart easy duplication of solutions. Ensure that each variant presents different numerical values, yielding disparate outcomes. Each question should have its noun labels changed. Additionally, each question should stand alone without requiring reference to any other question, although they may share the same solving concept. Your ultimate aim is to fashion an innovative array of challenges that captivate students and inspire analytical engagement.
+            <s> [INST] As an inventive educator dedicated to nurturing critical thinking skills, your task is to devise a series of a number of distinct iterations of a mathematical problem or a textual problem. Each iteration should be rooted in a fundamental problem-solving technique, but feature diverse numerical parameters and creatively reworded text to discourage students from sharing answers. Your objective is to generate a collection of unique questions that not only promote critical thinking but also thwart easy duplication of solutions. Ensure that each variant presents different numerical values, yielding disparate outcomes. Each question should have its noun labels changed. Additionally, each question should stand alone without requiring reference to any other question, although they may share the same solving concept. Your ultimate aim is to fashion an innovative array of challenges that captivate students and inspire analytical engagement.
             
             Strictly follow the format for your responses:
             generated_question_variants:
@@ -726,7 +731,7 @@ async def generate_question_variants(base_question, context):
             ..
             ..
             n:Variant n
-
+            
             -Few-shot examples-
             *Example 1 (Textual):*
             Please generate 3 variants of the question: What is the capital of France?
@@ -738,17 +743,23 @@ async def generate_question_variants(base_question, context):
             -This is a trivia quiz about geography.
 
             *Example 2 (Math):*
-            Please generate 5 variants of the question: "What is the perimeter of a square if each side measures 5 centimeters?"
+            Please generate 10 variants of the question: "What is the area of a rectangle with length 10 units and width 5 units?"
     
             generated_question_variants-
-            1. "Find the total length of a rectangle's border if its width is 3 meters and its height is 4 meters."
-            2. "Determine the circumference of a circle with a radius of 7 millimeters."
-            3. "Calculate the boundary length of an equilateral triangle with each side measuring 8 inches."
-            4. "What is the total distance around a polygon with four sides, where one side measures 9 feet and another side measures 12 feet?"
-            5. "Discover the perimeter of a rhombus if its diagonal measures 15 centimeters."
+            1. Find the region enclosed by a shape with a length of 12 inches and a width of 6 inches.
+            2. What is the total surface area of a rectangle that measures 8 meters in length and 4 meters in width?
+            3. Determine the amount of space occupied by an object with dimensions 15 feet long and 7 feet wide.
+            4. Calculate the region covered by a shape with a length of 9 centimeters and a width of 5 centimeters.
+            5. What is the total area enclosed by a rectangle with a length of 11 meters and a width of 3 meters?
+            6. Find the surface area of an object that measures 16 inches long and 8 inches wide.
+            7. Discover the region occupied by a shape with dimensions 10 feet long and 4 feet wide.
+            8. Calculate the total area enclosed by a rectangle with a length of 13 centimeters and a width of 6 centimeters.
+            9. What is the surface area of an object that measures 12 meters long and 5 meters wide?
+            10. Determine the amount of space occupied by an object with dimensions 9 inches long and 3 inches wide.
             -These are practice problems for basic geometry.
 
-            Explanation: The generated questions are similar to the originals but rephrased using different wording or focusing on a different aspect of the problem (area vs. perimeter, speed vs. time).
+            Explanation: Notice how the the numerical values are changing. It is essential that the numerical values are different for each variant. The generated questions are similar to the originals but rephrased using different wording or focusing on a different aspect of the problem (area vs. perimeter, speed vs. time).
+            [/INST]
         """
 
     # Define the payload for Ollama
@@ -766,14 +777,14 @@ async def generate_question_variants(base_question, context):
         "stream": False,
         "options": {
             "top_k": 1, 
-            "top_p": 0, 
+            "top_p": 1, 
             "temperature": 0, 
             "seed": 100, 
         }
     }
 
     # Asynchronous call to Ollama API
-    response = await asyncio.to_thread(ollama_chat, model='llama3', messages=payload['messages'], stream=payload['stream'])
+    response = await asyncio.to_thread(ollama_chat, model='dolphin-llama3', messages=payload['messages'], stream=payload['stream'])
 
     # Return the response content
     return response['message']['content']
@@ -786,8 +797,13 @@ async def ollama_aga(request: QueryRequest):
     context = await make_request(query)
     if context is None:
         raise HTTPException(status_code=500, detail="Failed to fetch context")
-    variants = await grading_assistant(query, context)
-    return {"variants": variants}
+    variants, scores = await grading_assistant(query, context)
+    print(scores)
+    response = {
+        "justification": variants,
+        "scores": scores
+    }
+    return response
 
 @app.post("/api/ollamaAQG")
 async def ollama_aqg(request: QueryRequest):
