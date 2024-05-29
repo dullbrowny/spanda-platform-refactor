@@ -711,7 +711,7 @@ async def instructor_eval(instructor_name, context, score_criterion, explanation
     return responses, scores_dict
 
 
-async def generate_question_variants(base_question, n, context):
+async def generate_question_variants(base_question, context):
     # Join the context into a single string
     user_context = " ".join(context)
 
@@ -760,7 +760,7 @@ async def generate_question_variants(base_question, n, context):
             },
             {
                 "role": "user",
-                "content": f"Please generate {n} variants of the question: '{base_question}'",
+                "content": f"'{base_question}'",
             }
         ],
         "stream": False,
@@ -793,8 +793,7 @@ async def ollama_aga(request: QueryRequest):
 async def ollama_aqg(request: QueryRequest):
     query = request.query
     context = await make_request(query)
-    n = 7
-    variants = await generate_question_variants(query, n, context)
+    variants = await generate_question_variants(query, context)
     return {"variants": variants}
 
 
