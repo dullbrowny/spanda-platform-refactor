@@ -2,6 +2,7 @@ import ollama
 import httpx
 import asyncio
 import json 
+import re
 
 async def make_request(query):
     async with httpx.AsyncClient(timeout=None) as client:  # Set timeout to None to wait indefinitely
@@ -19,6 +20,13 @@ async def make_request(query):
             if response_query.status_code == 200:
                 response_data = response_query.json()
                 print("Successfully retrieved context!")
+
+                # Extract and print document names from the chunks
+                chunks = response_data.get("chunks", [])
+                for chunk in chunks:
+                    doc_name = chunk.get("doc_name", "Unknown document")
+                    print(f"Document name: {doc_name}")
+
                 return response_data.get("context", "No context provided")
             else:
                 print(f"Query Request failed with status code {response_query.status_code}")
@@ -27,7 +35,8 @@ async def make_request(query):
             print(f"An error occurred while requesting {exc.request.url!r}: {exc}")
             return None
 
-async def instructor_eval(instructor_name, context, score_criterion):
+
+async def instructor_eval(instructor_name, context, score_criterion, explanation):
     # Define the criterion to evaluate
     user_context = " ".join(context)
 
@@ -52,29 +61,45 @@ async def instructor_eval(instructor_name, context, score_criterion):
                 "content": f"""
                 Here are your transcripts -
                 [TRANSCRIPT START]
-                    {user_context}
+                {context}
                 [TRANSCRIPT END]
 
-                <s> [INST] You are tasked with evaluating a teacher's performance based solely on {score_criterion}. 
-                Your assessment should be derived from a provided video transcript, ignoring any interruptions caused by student entries or exits and any notifications of participants 'joining the meeting' or 'leaving the meeting.' Assign scores from 0 to 3, where 0 indicates poor performance and 3 indicates exceptional performance. 
-                If the transcript lacks sufficient information to judge {score_criterion}, mark it as N/A and provide a clear explanation. If the score is not a perfect score, justify why. 
-                Please evaluate this instructor - {instructor_name}.
+                [INST] 
+                -Instructions:
+                    You are tasked with evaluating a teacher's performance based on the criterion: {score_criterion}. 
+                [/INST]
+                -Evaluation Details:
+                    -Criterion Explanation: {explanation}
+                    -Focus exclusively on the provided video transcript.
+                    -Ignore interruptions from student entries/exits and notifications of participants 'joining' or 'leaving' the meeting.'
+                    -Assign scores from 0 to 3:
+                        0: Poor performance
+                        1: Average performance
+                        2: Good
+                        3: Exceptional performance
+                -Criteria:
+                    -If the transcript lacks sufficient information to judge {score_criterion}, mark it as N/A and provide a clear explanation.
+                    -Justify any score that is not a perfect 3.
+                -Format for Evaluation:
+                {score_criterion}:
+                -Score: [SCORE]
 
-                Provide the evaluation strictly in the following format without any unnecessary words:
+                -Detailed Explanation with Examples:
 
-                {score_criterion} -
-                Score: SCORE
-                Detailed explanation of score with examples from the transcript:
-                [Overall Summary]
-                Example 1: ...
-                Example 2: ...
-                Example 3: ...
-                ....
-                Example n: ...
+                    -Overall Summary:
+                    -Example 1: "[Quoted text from transcript]" [Description] [Timestamp]
+                    -Example 2: "[Quoted text from transcript]" [Description] [Timestamp]
+                    -Example 3: "[Quoted text from transcript]" [Description] [Timestamp]
+                    -...
+                    -Example n: "[Quoted text from transcript]" [Description] [Timestamp]
+                -Include both positive and negative instances.
+                -Highlight poor examples if the score is not ideal.
 
-                These examples must contain good examples and bad examples. If the score is not ideal, showcase bad examples too.
+                Please evaluate the instructor: {instructor_name}
 
-                Rate on a scale of 0 to 3. Strictly follow this scale. Please use whole numbers.
+                Rate strictly on a scale of 0 to 3 using whole numbers only.
+
+                Ensure the examples are directly relevant to the evaluation criterion and discard any irrelevant excerpts.
                 """
             }
         ],
@@ -84,19 +109,28 @@ async def instructor_eval(instructor_name, context, score_criterion):
             "top_p": 1, 
             "temperature": 0, 
             "seed": 100, 
+            # "num_ctx": 10000
+            # "num_predict": 100,  # Reduced for shorter outputs
+            # "repeat_penalty": 1.2,  # Adjusted to reduce repetition
+            # "presence_penalty": 1.5, # Adjusted to discourage repeated concepts
+            # "frequency_penalty": 1.0 # Adjusted to reduce frequency of repeated tokens
         }
     }
 
     # Asynchronous call to the LLM API
-    response = await asyncio.to_thread(ollama.chat, model='llama3-gradient', messages=payload['messages'], stream=payload['stream'])
+    response = await asyncio.to_thread(ollama.chat, model='llama3', messages=payload['messages'], stream=payload['stream'])
 
     # Store the response
     responses[score_criterion] = response
 
     # Extract the score from the response content
     content = response['message']['content']
-    score_index = content.find("Score:")
-    if score_index != -1:
+
+    # Use regular expression to search for 'Score:' case insensitively
+    match = re.search(r'score:', content, re.IGNORECASE)
+
+    if match:
+        score_index = match.start()
         score_value = content[score_index + len("Score:"):].strip().split("\n")[0].strip()
         scores_dict[score_criterion] = score_value
     else:
@@ -119,19 +153,19 @@ async def instructor_eval(instructor_name, context, score_criterion):
 #         "Student Participation": "Encouraging and facilitating active involvement from all students in class discussions, activities, and assignments."
 #     }
 
-#     instructor_name = "NANDAGOPAL GOVINDAN"
-#     # instructor_name = "SANGVE SUNIL MAHADEV"
+#     # instructor_name = "NANDAGOPAL GOVINDAN"
+#     instructor_name = "SANGVE SUNIL MAHADEV"
 #     # instructor_name = "ASHUTOSH BHATIA"
 
 #     all_responses = {}
 #     all_scores = {}
 
 #     for dimension, explanation in dimensions.items():
-#         query = f"Based on the following criteria: {dimension} - {explanation}, Please evaluate the following teacher: {instructor_name}. Only evaluate the particular criteria based on the transcript, do not evaluate other criteria."
+#         query = f"Please provide an evaluation of the teacher named '{instructor_name}' on the following criteria: '{dimension}'."
 #         context = await make_request(query)  # Assuming make_request is defined elsewhere to get the context
-#         print(f"CONTEXT for {dimension}:")
-#         print(context)  # Print the context generated
-#         result_responses, result_scores = await instructor_eval(instructor_name, context, dimension)
+#         # print(f"CONTEXT for {dimension}:")
+#         # print(context)  # Print the context generated
+#         result_responses, result_scores = await instructor_eval(instructor_name, context, dimension, explanation)
 #         print(result_responses)
 #         print(result_scores)
 #         # Extract only the message['content'] part and store it

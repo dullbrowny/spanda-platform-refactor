@@ -171,7 +171,7 @@ class EmbeddingManager:
             "CohereEmbedder": CohereEmbedder(),
             "OllamaEmbedder": OllamaEmbedder(),
         }
-        self.selected_embedder: str = "ADAEmbedder"
+        self.selected_embedder: str = "MiniLMEmbedder"
 
     def embed(
         self,

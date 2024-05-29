@@ -499,7 +499,7 @@ async def make_request(query_user):
 
     # Retrieve chunks and context
     chunks, context = manager.retrieve_chunks([payload.query])
-
+    
     return context
 
 
