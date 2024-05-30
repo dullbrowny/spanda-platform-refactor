@@ -793,7 +793,7 @@ async def generate_question_variants(base_question, context):
     variants_dict = extract_variants(base_question, content)
     print(variants_dict)
     # Return the response content
-    return response['message']['content']
+    return response['message']['content'], variants_dict
 
 def extract_variants(base_question, content):
     pattern = r"\d+:\s*(.*)"
@@ -819,7 +819,11 @@ async def ollama_aga(request: QueryRequest):
 async def ollama_aqg(request: QueryRequest):
     query = request.query
     context = await make_request(query)
-    variants = await generate_question_variants(query, context)
+    variants, variants_dict = await generate_question_variants(query, context)
+    response = {
+        "variants": variants,
+        "variants_dict": variants_dict
+    }
     return {"variants": variants}
 
 
