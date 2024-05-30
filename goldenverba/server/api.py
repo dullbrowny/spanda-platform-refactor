@@ -506,7 +506,7 @@ async def make_request(query_user):
 
 async def grading_assistant(question_answer_pair, context):
     user_context = " ".join(context)
-    print(context)
+    # print(context)
     rubric_content = f"""<s> [INST] Please act as an impartial judge and evaluate the quality of the provided answer which attempts to answer the provided question based on a provided context.
             You'll be given context, question and answer to submit your reasoning and score for the correctness, comprehensiveness and readability of the answer. 
 
@@ -787,11 +787,19 @@ async def generate_question_variants(base_question, context):
 
     # Asynchronous call to Ollama API
     response = await asyncio.to_thread(ollama_chat, model='dolphin-llama3', messages=payload['messages'], stream=payload['stream'])
+   
+    content = response['message']['content']    
 
+    variants_dict = extract_variants(base_question, content)
+    print(variants_dict)
     # Return the response content
     return response['message']['content']
 
-
+def extract_variants(base_question, content):
+    pattern = r"\d+:\s*(.*)"
+    matches = re.findall(pattern, content)
+    variants = {base_question: matches}
+    return variants
 
 @app.post("/api/ollamaAGA")
 async def ollama_aga(request: QueryRequest):
