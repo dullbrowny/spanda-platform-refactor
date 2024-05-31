@@ -9,7 +9,6 @@ import json
 import httpx
 import re
 import ollama
-from pydantic import BaseModel
 
 import os
 from pathlib import Path
@@ -802,179 +801,6 @@ def extract_variants(base_question, content):
     variants = {base_question: matches}
     return variants
 
-async def instructor_eval(instructor_name, context, score_criterion, explanation):
-    # Define the criterion to evaluate
-    user_context = " ".join(context)
-
-    # Initialize empty dictionaries to store relevant responses and scores
-    responses = {}
-    scores_dict = {}
-
-    # Evaluation prompt template
-    evaluate_instructor = f"""
-    You are Verba, The Golden RAGtriever, a chatbot for Retrieval Augmented Generation (RAG). You will receive a user query and context pieces that have a semantic similarity to that specific query. Please answer these user queries only with their provided context. If the provided documentation does not provide enough information, say so. If the user asks questions about you as a chatbot specifically, answer them naturally. If the answer requires code examples, encapsulate them with ```programming-language-name ```. Don't do pseudo-code.
-    """
-
-    # Define the payload
-    payload = {
-        "messages": [
-            {
-                "role": "system",
-                "content": evaluate_instructor
-            },
-            {
-                "role": "user",
-                "content": f"""
-                Here are your transcripts -
-                [TRANSCRIPT START]
-                {context}
-                [TRANSCRIPT END]
-
-                [INST] 
-                -Instructions:
-                    You are tasked with evaluating a teacher's performance based on the criterion: {score_criterion}. 
-                [/INST]
-                -Evaluation Details:
-                    -Criterion Explanation: {explanation}
-                    -Focus exclusively on the provided video transcript.
-                    -Ignore interruptions from student entries/exits and notifications of participants 'joining' or 'leaving' the meeting.'
-                    -Assign scores from 0 to 3:
-                        0: Poor performance
-                        1: Average performance
-                        2: Good
-                        3: Exceptional performance
-                -Criteria:
-                    -If the transcript lacks sufficient information to judge {score_criterion}, mark it as N/A and provide a clear explanation.
-                    -Justify any score that is not a perfect 3.
-                -Format for Evaluation:
-                {score_criterion}:
-                -Score: [SCORE]
-
-                -Detailed Explanation with Examples:
-
-                    -Overall Summary:
-                    -Example 1: "[Quoted text from transcript]" [Description] [Timestamp]
-                    -Example 2: "[Quoted text from transcript]" [Description] [Timestamp]
-                    -Example 3: "[Quoted text from transcript]" [Description] [Timestamp]
-                    -...
-                    -Example n: "[Quoted text from transcript]" [Description] [Timestamp]
-                -Include both positive and negative instances.
-                -Highlight poor examples if the score is not ideal.
-
-                Please evaluate the instructor: {instructor_name}
-
-                Rate strictly on a scale of 0 to 3 using whole numbers only.
-
-                Ensure the examples are directly relevant to the evaluation criterion and discard any irrelevant excerpts.
-                """
-            }
-        ],
-        "stream": False,
-        "options": {
-            "top_k": 1, 
-            "top_p": 1, 
-            "temperature": 0, 
-            "seed": 100, 
-            # "num_ctx": 10000
-            # "num_predict": 100,  # Reduced for shorter outputs
-            # "repeat_penalty": 1.2,  # Adjusted to reduce repetition
-            # "presence_penalty": 1.5, # Adjusted to discourage repeated concepts
-            # "frequency_penalty": 1.0 # Adjusted to reduce frequency of repeated tokens
-        }
-    }
-
-    # Asynchronous call to the LLM API
-    response = await asyncio.to_thread(ollama_chat, model='llama3', messages=payload['messages'], stream=payload['stream'])
-
-    # Store the response
-    responses[score_criterion] = response
-
-    # Extract the score from the response content
-    content = response['message']['content']
-
-    # Use regular expression to search for 'Score:' case insensitively
-    match = re.search(r'score:', content, re.IGNORECASE)
-
-    if match:
-        score_index = match.start()
-        score_value = content[score_index + len("Score:"):].strip().split("\n")[0].strip()
-        scores_dict[score_criterion] = score_value
-    else:
-        scores_dict[score_criterion] = "N/A"
-
-    # Return the responses dictionary and scores dictionary
-    return responses, scores_dict
-
-
-async def generate_question_variants(base_question, n, context):
-    # Join the context into a single string
-    user_context = " ".join(context)
-
-    base_question_gen = """
-            As an inventive educator dedicated to nurturing critical thinking skills, your task is to devise a series of a number of distinct iterations of a mathematical problem or a textual problem. Each iteration should be rooted in a fundamental problem-solving technique, but feature diverse numerical parameters and creatively reworded text to discourage students from sharing answers. Your objective is to generate a collection of unique questions that not only promote critical thinking but also thwart easy duplication of solutions. Ensure that each variant presents different numerical values, yielding disparate outcomes. Each question should have its noun labels changed. Additionally, each question should stand alone without requiring reference to any other question, although they may share the same solving concept. Your ultimate aim is to fashion an innovative array of challenges that captivate students and inspire analytical engagement.
-            
-            Strictly follow the format for your responses:
-            generated_question_variants:
-            1:Variant 1
-            2:Variant 2
-            3:Variant 3
-            ..
-            ..
-            n:Variant n
-
-            -Few-shot examples-
-            *Example 1 (Textual):*
-            Please generate 3 variants of the question: What is the capital of France?
-
-            generated_question_variants-
-            1:In which European country is Paris located?
-            2:What is the capital of Italy?
-            3:What is the capital of Spain?
-            -This is a trivia quiz about geography.
-
-            *Example 2 (Math):*
-            Please generate 5 variants of the question: "What is the perimeter of a square if each side measures 5 centimeters?"
-    
-            generated_question_variants-
-            1. "Find the total length of a rectangle's border if its width is 3 meters and its height is 4 meters."
-            2. "Determine the circumference of a circle with a radius of 7 millimeters."
-            3. "Calculate the boundary length of an equilateral triangle with each side measuring 8 inches."
-            4. "What is the total distance around a polygon with four sides, where one side measures 9 feet and another side measures 12 feet?"
-            5. "Discover the perimeter of a rhombus if its diagonal measures 15 centimeters."
-            -These are practice problems for basic geometry.
-
-            Explanation: The generated questions are similar to the originals but rephrased using different wording or focusing on a different aspect of the problem (area vs. perimeter, speed vs. time).
-        """
-
-    # Define the payload for Ollama
-    payload = {
-        "messages": [
-            {
-                "role": "system",
-                "content": base_question_gen
-            },
-            {
-                "role": "user",
-                "content": f"Please generate {n} variants of the question: '{base_question}'",
-            }
-        ],
-        "stream": False,
-        "options": {
-            "top_k": 1, 
-            "top_p": 0, 
-            "temperature": 0, 
-            "seed": 100, 
-        }
-    }
-
-    # Asynchronous call to Ollama API
-    response = await asyncio.to_thread(ollama_chat, model='llama3', messages=payload['messages'], stream=payload['stream'])
-
-    # Return the response content
-    return response['message']['content']
-
-
-
 @app.post("/api/ollamaAGA")
 async def ollama_aga(request: QueryRequest):
     query = request.query
@@ -1001,9 +827,6 @@ async def ollama_aqg(request: QueryRequest):
     return {"variants": variants}
 
 
-class QueryRequest(BaseModel):
-    query: str
-
 @app.post("/api/ollamaAFE")
 async def ollama_afe(request: QueryRequest):
     dimensions = {
@@ -1024,17 +847,21 @@ async def ollama_afe(request: QueryRequest):
 
     for dimension, explanation in dimensions.items():
         query = f"Please provide an evaluation of the teacher named '{instructor_name}' on the following criteria: '{dimension}'."
-        context = await make_request(query)  # Get the context
+        context = await make_request(query)  # Assuming make_request is defined elsewhere to get the context
+        # print(f"CONTEXT for {dimension}:")
+        # print(context)  # Print the context generated
         result_responses, result_scores = await instructor_eval(instructor_name, context, dimension, explanation)
+        print(result_responses)
+        print(result_scores)
         # Extract only the message['content'] part and store it
         all_responses[dimension] = result_responses[dimension]['message']['content']
         all_scores[dimension] = result_scores[dimension]
-
+    
+    print("SCORES:")
+    print(json.dumps(all_scores, indent=2))
     response = {
         "DOCUMENT": all_responses,
         "SCORES": all_scores
     }
-
+    
     return response
-
-
