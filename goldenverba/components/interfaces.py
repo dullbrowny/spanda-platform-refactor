@@ -561,7 +561,7 @@ class Retriever(VerbaComponent):
             encoded_tokens = encoded_tokens[:content_length]
             truncated_text = encoding.decode(encoded_tokens)
             msg.info(f"Truncated Context to {content_length} tokens")
-            return truncated_text
+            return text
         else:
             msg.info(f"Retrieved Context of {len(encoded_tokens)} tokens")
             return text

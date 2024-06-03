@@ -622,19 +622,6 @@ async def instructor_eval(instructor_name, context, score_criterion, explanation
 
     # Evaluation prompt template
     evaluate_instructor = f"""
-    You are Verba, The Golden RAGtriever, a chatbot for Retrieval Augmented Generation (RAG). You will receive a user query and context pieces that have a semantic similarity to that specific query. Please answer these user queries only with their provided context. If the provided documentation does not provide enough information, say so. If the user asks questions about you as a chatbot specifically, answer them naturally. If the answer requires code examples, encapsulate them with ```programming-language-name ```. Don't do pseudo-code.
-    """
-
-    # Define the payload
-    payload = {
-        "messages": [
-            {
-                "role": "system",
-                "content": evaluate_instructor
-            },
-            {
-                "role": "user",
-                "content": f"""
                 Here are your transcripts -
                 [TRANSCRIPT START]
                 {context}
@@ -642,8 +629,26 @@ async def instructor_eval(instructor_name, context, score_criterion, explanation
 
                 [INST] 
                 -Instructions:
-                    You are tasked with evaluating a teacher's performance based on the criterion: {score_criterion}. 
-                [/INST]
+                    You are tasked with evaluating a teacher's performance based on the criterion: {score_criterion} - {explanation}. 
+                -Transcript format:
+                    The transcript typically starts with participants joining the meeting, followed by the instructor's name and their messages. Please ensure you strictly extracts and processes the text that appears below the name of the instructor, which follows the format shown in the example below:
+
+                    Example:
+                    PARTICIPANT 1 joined the meeting
+
+                    PARTICIPANT 2 joined the meeting
+
+                    PARTICIPANT 3 left the meeting
+
+                    [INSTRUCTOR NAME]   1:37
+                    OK, so we have started with the computer networks and here we have defined. 
+                    What do you mean by network? 
+                    So briefly, we have defined the network as an interconnected collection of two or more autonomous computers, or we are going to say that these two or more computers are set to be connected only if they can exchange information among themselves.
+                    
+                    PARTICIPANT 5 left the meeting
+
+                    -In this example, you should focus on the time of joining/leaving for the instructor and the content spoken by the instructor.
+                
                 -Evaluation Details:
                     -Criterion Explanation: {explanation}
                     -Focus exclusively on the provided video transcript.
@@ -671,11 +676,23 @@ async def instructor_eval(instructor_name, context, score_criterion, explanation
                 -Include both positive and negative instances.
                 -Highlight poor examples if the score is not ideal.
 
-                Please evaluate the instructor: {instructor_name}
-
                 Rate strictly on a scale of 0 to 3 using whole numbers only.
 
                 Ensure the examples are directly relevant to the evaluation criterion and discard any irrelevant excerpts.
+                [/INST]    
+    """
+
+    # Define the payload
+    payload = {
+        "messages": [
+            {
+                "role": "system",
+                "content": evaluate_instructor
+            },
+            {
+                "role": "user",
+                "content": f"""
+                    Please provide an evaluation of the teacher named '{instructor_name}' on the following criteria: '{score_criterion}'. Only include information from transcripts where '{instructor_name}' is the instructor. Here is your rubric - {explanation}.
                 """
             }
         ],
@@ -694,7 +711,7 @@ async def instructor_eval(instructor_name, context, score_criterion, explanation
     }
 
     # Asynchronous call to the LLM API
-    response = await asyncio.to_thread(ollama_chat, model='llama3', messages=payload['messages'], stream=payload['stream'])
+    response = await asyncio.to_thread(ollama_chat, model='dolphin-llama3', messages=payload['messages'], stream=payload['stream'])
 
     # Store the response
     responses[score_criterion] = response
@@ -830,15 +847,87 @@ async def ollama_aqg(request: QueryRequest):
 @app.post("/api/ollamaAFE")
 async def ollama_afe(request: QueryRequest):
     dimensions = {
-        "Communication Clarity": "The ability to convey information and instructions clearly and effectively so that students can easily understand the material being taught.",
-        "Punctuality": "Consistently starting and ending classes on time, as well as meeting deadlines for assignments and other class-related activities.",
-        "Positivity": "Maintaining a positive attitude, providing encouragement, and fostering a supportive and optimistic learning environment.",
-        "Personal Engagement": "Taking an active interest in each student's learning experience, addressing individual needs, and building meaningful connections with students.",
-        "Classroom Management Practices": "Implementing strategies to maintain order, minimize disruptions, and ensure a productive and respectful classroom environment.",
-        "Adherence to Rules": "Consistently following and enforcing classroom and school policies, ensuring that both the teacher and students abide by established guidelines.",
-        "Classroom Atmosphere": "Creating a welcoming, inclusive, and comfortable environment that promotes learning and collaboration among students.",
-        "Student Participation": "Encouraging and facilitating active involvement from all students in class discussions, activities, and assignments."
+        "Communication Clarity": "The ability to convey information and instructions clearly and effectively so that students can easily understand the material being taught.\n"
+                                "0: Instructions are often vague or confusing, leading to frequent misunderstandings among students.\n"
+                                "Example: 'Read the text and do the thing.'\n"
+                                "1: Occasionally provides clear instructions but often lacks detail, requiring students to ask for further clarification.\n"
+                                "Example: 'Read the chapter and summarize it.'\n"
+                                "2: Generally clear and detailed in communication, though sometimes slightly ambiguous.\n"
+                                "Example: 'Read chapter 3 and summarize the main points in 200 words.'\n"
+                                "3: Always communicates instructions and information clearly, precisely, and comprehensively, ensuring students fully understand what is expected.\n"
+                                "Example: 'Read chapter 3, identify the main points, and write a 200-word summary. Make sure to include at least three key arguments presented by the author.'",
+
+        "Punctuality": "Consistently starting and ending classes on time, as well as meeting deadlines for assignments and other class-related activities.\n"
+                    "0: Frequently starts and ends classes late, often misses deadlines for assignments and class-related activities.\n"
+                    "Example: Class is supposed to start at 9:00 AM but often begins at 9:15 AM, and assignments are returned late.\n"
+                    "1: Occasionally late to start or end classes and sometimes misses deadlines.\n"
+                    "Example: Class sometimes starts a few minutes late, and assignments are occasionally returned a day late.\n"
+                    "2: Generally punctual with minor exceptions, mostly meets deadlines.\n"
+                    "Example: Class starts on time 90%' of the time, and assignments are returned on the due date.\n"
+                    "3: Always starts and ends classes on time, consistently meets deadlines for assignments and other activities.\n"
+                    "Example: Class starts exactly at 9:00 AM every day, and assignments are always returned on the specified due date.",
+
+        "Positivity": "Maintaining a positive attitude, providing encouragement, and fostering a supportive and optimistic learning environment.\n"
+                    "0: Rarely displays a positive attitude, often appears disengaged or discouraging.\n"
+                    "Example: Rarely smiles or offers encouragement, responds negatively to student questions.\n"
+                    "1: Occasionally positive, but can be inconsistent in attitude and support.\n"
+                    "Example: Sometimes offers praise but often seems indifferent.\n"
+                    "2: Generally maintains a positive attitude and provides encouragement, though with occasional lapses.\n"
+                    "Example: Usually offers praise and support but has off days.\n"
+                    "3: Consistently maintains a positive and encouraging attitude, always fostering a supportive and optimistic environment.\n"
+                    "Example: Always greets students warmly, frequently provides positive feedback and encouragement.",
+
+        "Personal Engagement": "Taking an active interest in each student's learning experience, addressing individual needs, and building meaningful connections with students.\n"
+                            "0: Shows little to no interest in individual students' learning experiences.\n"
+                            "Example: Rarely interacts with students one-on-one or addresses their unique needs.\n"
+                            "1: Occasionally engages with students on a personal level, but is often superficial.\n"
+                            "Example: Knows some students' names but rarely follows up on individual progress.\n"
+                            "2: Generally takes an interest in students' learning experiences and addresses individual needs, with some inconsistency.\n"
+                            "Example: Knows most students' names and occasionally checks in on their progress.\n"
+                            "3: Actively engages with each student, consistently addressing individual needs and building meaningful connections.\n"
+                            "Example: Knows all students by name, frequently checks in on their progress, and offers personalized support.",
+
+        "Classroom Management Practices": "Implementing strategies to maintain order, minimize disruptions, and ensure a productive and respectful classroom environment.\n"
+                                        "0: Lacks effective strategies, leading to frequent disruptions and a chaotic environment.\n"
+                                        "Example: Students often talk over the teacher, and the class frequently gets off-topic.\n"
+                                        "1: Occasionally implements management strategies but is often inconsistent, leading to some disruptions.\n"
+                                        "Example: Sometimes establishes rules, but often fails to enforce them.\n"
+                                        "2: Generally uses effective strategies to maintain order, with minor disruptions.\n"
+                                        "Example: Establishes rules and usually enforces them, with occasional lapses.\n"
+                                        "3: Consistently implements effective strategies, maintaining a productive and respectful environment.\n"
+                                        "Example: Establishes clear rules from day one, consistently enforces them, and quickly addresses any disruptions.",
+
+        "Adherence to Rules": "Consistently following and enforcing classroom and school policies, ensuring that both the teacher and students abide by established guidelines.\n"
+                            "0: Frequently disregards classroom and school policies, leading to a lack of structure.\n"
+                            "Example: Often allows food in the classroom despite school policy.\n"
+                            "1: Occasionally follows and enforces rules but is inconsistent, causing confusion.\n"
+                            "Example: Enforces some rules strictly but ignores others.\n"
+                            "2: Generally adheres to and enforces rules, with minor inconsistencies.\n"
+                            "Example: Mostly follows and enforces policies, with occasional lapses.\n"
+                            "3: Always follows and strictly enforces classroom and school policies.\n"
+                            "Example: Consistently enforces no-phone policy and dress code.",
+
+        "Classroom Atmosphere": "Creating a welcoming, inclusive, and comfortable environment that promotes learning and collaboration among students.\n"
+                                "0: Creates an unwelcoming or hostile environment, making students feel uncomfortable.\n"
+                                "Example: Classroom feels tense, and students are afraid to ask questions.\n"
+                                "1: Occasionally welcoming but often fails to create an inclusive or comfortable environment.\n"
+                                "Example: Some students feel included, but others do not.\n"
+                                "2: Generally creates a welcoming and inclusive environment, with minor exceptions.\n"
+                                "Example: Most students feel comfortable and included, but not all.\n"
+                                "3: Consistently fosters a welcoming, inclusive, and comfortable atmosphere.\n"
+                                "Example: All students feel safe, included, and encouraged to participate.",
+
+        "Student Participation": "Encouraging and facilitating active involvement from all students in class discussions, activities, and assignments.\n"
+                                "0: Rarely encourages or facilitates student involvement, resulting in minimal participation.\n"
+                                "Example: Few students ever raise their hands or engage in discussions.\n"
+                                "1: Occasionally encourages participation but lacks consistency, leading to uneven involvement.\n"
+                                "Example: Encourages participation during some activities but not others.\n"
+                                "2: Generally encourages and facilitates active involvement, with some students more engaged than others.\n"
+                                "Example: Most students participate regularly, but a few remain disengaged.\n"
+                                "3: Consistently encourages and ensures active involvement from all students.\n"
+                                "Example: Uses various strategies to engage all students, such as group discussions and interactive activities."
     }
+
 
     instructor_name = request.query
 
@@ -846,7 +935,7 @@ async def ollama_afe(request: QueryRequest):
     all_scores = {}
 
     for dimension, explanation in dimensions.items():
-        query = f"Please provide an evaluation of the teacher named '{instructor_name}' on the following criteria: '{dimension}'."
+        query = f"Judge {instructor_name} based on {dimension}."
         context = await make_request(query)  # Assuming make_request is defined elsewhere to get the context
         # print(f"CONTEXT for {dimension}:")
         # print(context)  # Print the context generated
