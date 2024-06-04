@@ -614,86 +614,70 @@ async def grading_assistant(question_answer_pair, context):
 
 async def instructor_eval(instructor_name, context, score_criterion, explanation):
     # Define the criterion to evaluate
-    user_context = " ".join(context)
-
+    user_context = "".join(context)
+    # print(context)
     # Initialize empty dictionaries to store relevant responses and scores
     responses = {}
     scores_dict = {}
 
     # Evaluation prompt template
-    evaluate_instructor = f"""
-                Here are your transcripts -
-                [TRANSCRIPT START]
-                {context}
-                [TRANSCRIPT END]
+    evaluate_instructions = f"""
+        [INST]
+        -Instructions:
+            You are tasked with evaluating a teacher's performance based on the criterion: {score_criterion} - {explanation}.
 
-                [INST] 
-                -Instructions:
-                    You are tasked with evaluating a teacher's performance based on the criterion: {score_criterion} - {explanation}. 
-                -Transcript format:
-                    The transcript typically starts with participants joining the meeting, followed by the instructor's name and their messages. Please ensure you strictly extracts and processes the text that appears below the name of the instructor, which follows the format shown in the example below:
+        -Evaluation Details:
+            -Focus exclusively on the provided video transcript.
+            -Ignore interruptions from student entries/exits and notifications of participants 'joining' or 'leaving' the meeting.
+            -Assign scores from 0 to 3:
+                0: Poor performance
+                1: Average performance
+                2: Good performance
+                3: Exceptional performance
+        -Criteria:
+            -Criterion Explanation: {explanation}
+            -If the transcript lacks sufficient information to judge {score_criterion}, mark it as N/A and provide a clear explanation.
+            -Justify any score that is not a perfect 3.
 
-                    Example:
-                    PARTICIPANT 1 joined the meeting
+        Strictly follow the output format-
+        -Output Format:
+            -{score_criterion}: Score: score(range of 0 to 3, or N/A)
 
-                    PARTICIPANT 2 joined the meeting
+            -Detailed Explanation with Examples and justification for examples:
+                -Example 1: "[Quoted text from transcript]" [Description] [Timestamp]
+                -Example 2: "[Quoted text from transcript]" [Description] [Timestamp]
+                -Example 3: "[Quoted text from transcript]" [Description] [Timestamp]
+                -...
+                -Example n: "[Quoted text from transcript]" [Description] [Timestamp]
+            -Include both positive and negative instances.
+            -Highlight poor examples if the score is not ideal.
 
-                    PARTICIPANT 3 left the meeting
+            -Consider the context surrounding the example statements, as the context in which a statement is made is extremely important.
 
-                    [INSTRUCTOR NAME]   1:37
-                    OK, so we have started with the computer networks and here we have defined. 
-                    What do you mean by network? 
-                    So briefly, we have defined the network as an interconnected collection of two or more autonomous computers, or we are going to say that these two or more computers are set to be connected only if they can exchange information among themselves.
-                    
-                    PARTICIPANT 5 left the meeting
+            Rate strictly on a scale of 0 to 3 using whole numbers only.
 
-                    -In this example, you should focus on the time of joining/leaving for the instructor and the content spoken by the instructor.
-                
-                -Evaluation Details:
-                    -Criterion Explanation: {explanation}
-                    -Focus exclusively on the provided video transcript.
-                    -Ignore interruptions from student entries/exits and notifications of participants 'joining' or 'leaving' the meeting.'
-                    -Assign scores from 0 to 3:
-                        0: Poor performance
-                        1: Average performance
-                        2: Good
-                        3: Exceptional performance
-                -Criteria:
-                    -If the transcript lacks sufficient information to judge {score_criterion}, mark it as N/A and provide a clear explanation.
-                    -Justify any score that is not a perfect 3.
-                -Format for Evaluation:
-                {score_criterion}:
-                -Score: [SCORE]
-
-                -Detailed Explanation with Examples:
-
-                    -Overall Summary:
-                    -Example 1: "[Quoted text from transcript]" [Description] [Timestamp]
-                    -Example 2: "[Quoted text from transcript]" [Description] [Timestamp]
-                    -Example 3: "[Quoted text from transcript]" [Description] [Timestamp]
-                    -...
-                    -Example n: "[Quoted text from transcript]" [Description] [Timestamp]
-                -Include both positive and negative instances.
-                -Highlight poor examples if the score is not ideal.
-
-                Rate strictly on a scale of 0 to 3 using whole numbers only.
-
-                Ensure the examples are directly relevant to the evaluation criterion and discard any irrelevant excerpts.
-                [/INST]    
+            Ensure the examples are directly relevant to the evaluation criterion and discard any irrelevant excerpts.
+        [/INST]
     """
+    system_message = """This is a chat between a user and a judge. The judge gives helpful, detailed, and polite suggestions for improvement for a particular teacher from the given context - the context contains transcripts of videos. The assistant should also indicate when the judgement be found in the context."""
+    
+    formatted_transcripts = f"""Here are given transcripts for {instructor_name}-   
+                    [TRANSCRIPT START]
+                    {user_context}
+                    [TRANSCRIPT END]"""
+    
+    user_prompt = f"""Please provide an evaluation of the teacher named '{instructor_name}' on the following criteria: '{score_criterion}'. Only include information from transcripts where '{instructor_name}' is the instructor."""
 
     # Define the payload
     payload = {
         "messages": [
             {
                 "role": "system",
-                "content": evaluate_instructor
+                "content": system_message
             },
             {
                 "role": "user",
-                "content": f"""
-                    Please provide an evaluation of the teacher named '{instructor_name}' on the following criteria: '{score_criterion}'. Only include information from transcripts where '{instructor_name}' is the instructor. Here is your rubric - {explanation}.
-                """
+                "content": formatted_transcripts + "/n/n" + evaluate_instructions + "/n/n" + user_prompt + " Strictly follow the format of output provided."
             }
         ],
         "stream": False,
@@ -711,7 +695,7 @@ async def instructor_eval(instructor_name, context, score_criterion, explanation
     }
 
     # Asynchronous call to the LLM API
-    response = await asyncio.to_thread(ollama_chat, model='dolphin-llama3', messages=payload['messages'], stream=payload['stream'])
+    response = await asyncio.to_thread(ollama.chat, model='llama3', messages=payload['messages'], stream=payload['stream'])
 
     # Store the response
     responses[score_criterion] = response
@@ -719,12 +703,18 @@ async def instructor_eval(instructor_name, context, score_criterion, explanation
     # Extract the score from the response content
     content = response['message']['content']
 
-    # Use regular expression to search for 'Score:' case insensitively
-    match = re.search(r'score:', content, re.IGNORECASE)
+    # Adjust the regular expression to handle various cases including 'Score:', direct number, asterisks, and new lines
+    pattern = rf'(score:\s*([\s\S]*?)(\d+)|\**{score_criterion}\**\s*:\s*(\d+))'
+    match = re.search(pattern, content, re.IGNORECASE)
 
     if match:
-        score_index = match.start()
-        score_value = content[score_index + len("Score:"):].strip().split("\n")[0].strip()
+        # Check which group matched and extract the score
+        if match.group(3):  # This means 'Score:' pattern matched
+            score_value = match.group(3).strip()  # group(3) contains the number after 'Score:'
+        elif match.group(4):  # This means direct number pattern matched
+            score_value = match.group(4).strip()  # group(4) contains the number directly after score criterion
+        else:
+            score_value = "N/A"  # Fallback in case groups are not as expected
         scores_dict[score_criterion] = score_value
     else:
         scores_dict[score_criterion] = "N/A"
