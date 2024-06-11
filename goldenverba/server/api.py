@@ -302,7 +302,6 @@ async def query(payload: QueryPayload):
     msg.good(f"Received query: {payload.query}")
     start_time = time.time()  # Start timing
     try:
-        print("test1")
         chunks, context = manager.retrieve_chunks([payload.query])
 
         retrieved_chunks = [
@@ -316,7 +315,6 @@ async def query(payload: QueryPayload):
             }
             for chunk in chunks
         ]
-        print(retrieved_chunks)
         elapsed_time = round(time.time() - start_time, 2)  # Calculate elapsed time
         msg.good(f"Succesfully processed query: {payload.query} in {elapsed_time}s")
 
@@ -490,7 +488,7 @@ async def delete_document(payload: GetDocumentPayload):
     manager.delete_document_by_id(payload.document_id)
     return JSONResponse(content={})
 
-#for Ollama AGA
+#for bitspprojs
 async def make_request(query_user):
     # Escape the query to handle special characters and newlines
     formatted_query = json.dumps(query_user)
@@ -502,6 +500,7 @@ async def make_request(query_user):
     chunks, context = manager.retrieve_chunks([payload.query])
     
     return context
+
 
 
 async def grading_assistant(question_answer_pair, context):
@@ -615,11 +614,12 @@ async def grading_assistant(question_answer_pair, context):
 async def instructor_eval(instructor_name, context, score_criterion, explanation):
     # Define the criterion to evaluate
     user_context = "".join(context)
-    # print(context)
+    # print(user_context)
     # Initialize empty dictionaries to store relevant responses and scores
     responses = {}
     scores_dict = {}
-
+    # Initialize score_value with a default value
+    score_value = None
     # Evaluation prompt template
     evaluate_instructions = f"""
         [INST]
@@ -629,19 +629,22 @@ async def instructor_eval(instructor_name, context, score_criterion, explanation
         -Evaluation Details:
             -Focus exclusively on the provided video transcript.
             -Ignore interruptions from student entries/exits and notifications of participants 'joining' or 'leaving' the meeting.
-            -Assign scores from 0 to 3:
-                0: Poor performance
-                1: Average performance
-                2: Good performance
-                3: Exceptional performance
+            -Assign scores from 1 to 5:
         -Criteria:
             -Criterion Explanation: {explanation}
             -If the transcript lacks sufficient information to judge {score_criterion}, mark it as N/A and provide a clear explanation.
-            -Justify any score that is not a perfect 3.
+            -Justify any score that is not a perfect 5.
+            -Consider the context surrounding the example statements, as the context in which a statement is made is extremely important.
 
-        Strictly follow the output format-
+            Rate strictly on a scale of 1 to 5 using whole numbers only.
+
+            Ensure the examples are directly relevant to the evaluation criterion and discard any irrelevant excerpts.
+        [/INST]
+    """
+
+    output_format = f"""Strictly follow the output format-
         -Output Format:
-            -{score_criterion}: Score: score(range of 0 to 3, or N/A)
+            -{score_criterion}: Score(range of 1 to 5, or N/A) - note: Do not use bold or italics or any formatting in this line.
 
             -Detailed Explanation with Examples and justification for examples:
                 -Example 1: "[Quoted text from transcript]" [Description] [Timestamp]
@@ -650,15 +653,8 @@ async def instructor_eval(instructor_name, context, score_criterion, explanation
                 -...
                 -Example n: "[Quoted text from transcript]" [Description] [Timestamp]
             -Include both positive and negative instances.
-            -Highlight poor examples if the score is not ideal.
-
-            -Consider the context surrounding the example statements, as the context in which a statement is made is extremely important.
-
-            Rate strictly on a scale of 0 to 3 using whole numbers only.
-
-            Ensure the examples are directly relevant to the evaluation criterion and discard any irrelevant excerpts.
-        [/INST]
-    """
+            -Highlight poor examples if the score is not ideal."""
+    
     system_message = """This is a chat between a user and a judge. The judge gives helpful, detailed, and polite suggestions for improvement for a particular teacher from the given context - the context contains transcripts of videos. The assistant should also indicate when the judgement be found in the context."""
     
     formatted_transcripts = f"""Here are given transcripts for {instructor_name}-   
@@ -677,7 +673,7 @@ async def instructor_eval(instructor_name, context, score_criterion, explanation
             },
             {
                 "role": "user",
-                "content": formatted_transcripts + "/n/n" + evaluate_instructions + "/n/n" + user_prompt + " Strictly follow the format of output provided."
+                "content": formatted_transcripts + "/n/n" + evaluate_instructions + "/n/n" + user_prompt + "/n/n" + output_format
             }
         ],
         "stream": False,
@@ -704,20 +700,30 @@ async def instructor_eval(instructor_name, context, score_criterion, explanation
     content = response['message']['content']
 
     # Adjust the regular expression to handle various cases including 'Score:', direct number, asterisks, and new lines
-    pattern = rf'(score:\s*([\s\S]*?)(\d+)|\**{score_criterion}\**\s*:\s*(\d+))'
+    pattern = rf'(?i)(score:\s*(\d+)|\**{re.escape(score_criterion)}\**\s*[:\-]?\s*(\d+))'
+
     match = re.search(pattern, content, re.IGNORECASE)
 
     if match:
         # Check which group matched and extract the score
-        if match.group(3):  # This means 'Score:' pattern matched
-            score_value = match.group(3).strip()  # group(3) contains the number after 'Score:'
-        elif match.group(4):  # This means direct number pattern matched
-            score_value = match.group(4).strip()  # group(4) contains the number directly after score criterion
+        if match.group(2):  # This means 'Score:' pattern matched
+            score_value = match.group(2).strip()  # group(2) contains the number after 'Score:'
+        elif match.group(3):  # This means direct number pattern matched
+            score_value = match.group(3).strip()  # group(3) contains the number directly after score criterion
         else:
             score_value = "N/A"  # Fallback in case groups are not as expected
         scores_dict[score_criterion] = score_value
     else:
         scores_dict[score_criterion] = "N/A"
+        
+    # If the score is still "N/A", check explicitly for the `**` case
+    if score_value == "N/A":
+        pattern_strict = rf'\*\*{re.escape(score_criterion)}\*\*\s*[:\-]?\s*(\d+)'
+        match_strict = re.search(pattern_strict, content)
+        if match_strict:
+            score_value = match_strict.group(1).strip()
+        else:
+            score_value = "N/A"
 
     # Return the responses dictionary and scores dictionary
     return responses, scores_dict
@@ -730,8 +736,66 @@ async def generate_question_variants(base_question, context):
     base_question_gen = f"""
             <s> [INST] As an inventive educator dedicated to nurturing critical thinking skills, your task is to devise a series of a number of distinct iterations of a mathematical problem or a textual problem. Each iteration should be rooted in a fundamental problem-solving technique, but feature diverse numerical parameters and creatively reworded text to discourage students from sharing answers. Your objective is to generate a collection of unique questions that not only promote critical thinking but also thwart easy duplication of solutions. Ensure that each variant presents different numerical values, yielding disparate outcomes. Each question should have its noun labels changed. Additionally, each question should stand alone without requiring reference to any other question, although they may share the same solving concept. Your ultimate aim is to fashion an innovative array of challenges that captivate students and inspire analytical engagement.
             Strictly ensure that the questions are relevant to the following context-
+            [CONTEXT START]
             {context}
+            [CONTEXT END]
+            
+            Example 1:
+            Original Question: What are the implications of Kant's categorical imperative on modern ethical theory?
 
+            Generated Question Variants:
+
+            1. How does Kant's categorical imperative shape contemporary discussions in normative ethics?
+            2. In what ways does Kant's notion of the categorical imperative influence current ethical frameworks?
+            3. Can Kant's categorical imperative be reconciled with utilitarian principles in modern ethical debates?
+            4. How do modern deontologists interpret Kant's categorical imperative in the context of bioethics?
+            5. What are the contemporary criticisms of applying Kant's categorical imperative to global justice issues?
+            6. How does Kant's categorical imperative inform the ethical considerations in artificial intelligence development?
+
+            -These are advanced discussion prompts for graduate-level philosophy seminars.
+            
+            Example 2:
+            Original Question: What is the molarity of a solution containing 5 moles of solute in 2 liters of solution?
+
+            generated_question_variants:
+
+            1. What is the molarity of a solution containing 3 moles of solute in 1.5 liters of solution?
+            2. Calculate the molarity of a solution with 8 moles of solute in 4 liters of solution.
+            3. If a solution contains 6 moles of solute in 3 liters of solution, what is its molarity?
+            4. Determine the molarity of a solution with 2 moles of solute in 0.5 liters of solution.
+            5. What is the molarity of a solution with 7 moles of solute in 2.5 liters of solution?
+            6. Calculate the molarity of a solution containing 4 moles of solute in 1 liter of solution.
+
+            -These are specialized numerical questions for advanced chemistry courses.
+
+            Example 3:
+            Original Question:
+            Calculate the sequence of prime numbers up to 50. Show the order of the prime numbers in the sequence - 2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47.
+
+            generated_question_variants:
+
+            1. Determine the sequence of Fibonacci numbers up to the 10th term. Show the order of the Fibonacci numbers in the sequence - 0, 1, 1, 2, 3, 5, 8, 13, 21, 34.
+            2. Identify the sequence of even numbers from 2 to 20. Show the order of the even numbers in the sequence - 2, 4, 6, 8, 10, 12, 14, 16, 18, 20.
+            3. Calculate the sequence of squares of the first 10 natural numbers. Show the order of the squares in the sequence - 1, 4, 9, 16, 25, 36, 49, 64, 81, 100.
+            4. Determine the sequence of powers of 2 up to \(2^(10)\). Show the order of the powers of 2 in the sequence - 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024.
+            5. Identify the sequence of triangular numbers up to the 10th term. Show the order of the triangular numbers in the sequence - 1, 3, 6, 10, 15, 21, 28, 36, 45, 55.
+
+
+            -These are advanced pseudo-code problems for computer science students focusing on streaming algorithms.
+            
+            generated_question_variants:
+            Original Question: Utilizing an initial score of 5 and a multiplier of 0.2, determine which product is the most popular based on this sequence of ratings: A, B, A, C, B, A, C, B, A, B?
+
+            Variants:
+            1. Given an initial score of 3 and a multiplier of 0.1, identify which app is the most downloaded based on this sequence of reviews: X, Y, Z, X, X, Y, Z, X, Y, Z?
+            2. With an initial score of 4 and a multiplier of 0.15, determine which book is the most read based on this series of mentions: Book1, Book2, Book1, Book3, Book2, Book1, Book3, Book2, Book1, Book3?
+            3. Using an initial score of 2 and a multiplier of 0.05, find which movie is the highest rated based on the following set of ratings: MovieA, MovieB, MovieA, MovieC, MovieB, MovieA, MovieC, MovieB, MovieA, MovieB?
+            4. With an initial score of 6 and a multiplier of 0.25, calculate which song is the most popular based on this stream of plays: SongX, SongY, SongX, SongZ, SongY, SongX, SongZ, SongY, SongX, SongZ?
+            5. Given an initial score of 4.5 and a multiplier of 0.3, determine which TV show is the most watched based on the following sequence of episodes: Show1, Show2, Show1, Show3, Show2, Show1, Show3, Show2, Show1, Show3?
+
+            Explanation: NOTE that no two variants must be dependent on each other, each and every variant needs to be a seperate question which can be answered just by looking at the particular variant, and no external data.
+            Notice how the the numerical values are changing, it is extremely important for the numerical values to change. If there is a sequence, it will change too. It is essential that the numerical values are different for each variant. The generated questions are similar to the originals but rephrased using different wording or focusing on a different aspect of the problem (area vs. perimeter, speed vs. time).
+            
             Strictly follow the format for your responses:
             generated_question_variants:
             1:Variant 1
@@ -740,34 +804,6 @@ async def generate_question_variants(base_question, context):
             ..
             ..
             n:Variant n
-            
-            -Few-shot examples-
-            *Example 1 (Textual):*
-            Please generate 3 variants of the question: What is the capital of France?
-
-            generated_question_variants-
-            1:In which European country is Paris located?
-            2:What is the capital of Italy?
-            3:What is the capital of Spain?
-            -This is a trivia quiz about geography.
-
-            *Example 2 (Math):*
-            Please generate 10 variants of the question: "What is the area of a rectangle with length 10 units and width 5 units?"
-    
-            generated_question_variants-
-            1. Find the region enclosed by a shape with a length of 12 inches and a width of 6 inches.
-            2. What is the total surface area of a rectangle that measures 8 meters in length and 4 meters in width?
-            3. Determine the amount of space occupied by an object with dimensions 15 feet long and 7 feet wide.
-            4. Calculate the region covered by a shape with a length of 9 centimeters and a width of 5 centimeters.
-            5. What is the total area enclosed by a rectangle with a length of 11 meters and a width of 3 meters?
-            6. Find the surface area of an object that measures 16 inches long and 8 inches wide.
-            7. Discover the region occupied by a shape with dimensions 10 feet long and 4 feet wide.
-            8. Calculate the total area enclosed by a rectangle with a length of 13 centimeters and a width of 6 centimeters.
-            9. What is the surface area of an object that measures 12 meters long and 5 meters wide?
-            10. Determine the amount of space occupied by an object with dimensions 9 inches long and 3 inches wide.
-            -These are practice problems for basic geometry.
-
-            Explanation: Notice how the the numerical values are changing. It is essential that the numerical values are different for each variant. The generated questions are similar to the originals but rephrased using different wording or focusing on a different aspect of the problem (area vs. perimeter, speed vs. time).
             [/INST]
         """
 
@@ -794,7 +830,7 @@ async def generate_question_variants(base_question, context):
 
     # Asynchronous call to Ollama API
     response = await asyncio.to_thread(ollama_chat, model='dolphin-llama3', messages=payload['messages'], stream=payload['stream'])
-   
+    print(response)
     content = response['message']['content']    
 
     variants_dict = extract_variants(base_question, content)
@@ -803,10 +839,25 @@ async def generate_question_variants(base_question, context):
     return response['message']['content'], variants_dict
 
 def extract_variants(base_question, content):
-    pattern = r"\d+:\s*(.*)"
-    matches = re.findall(pattern, content)
-    variants = {base_question: matches}
-    return variants
+    # Isolate the section starting from 'generated_question_variants'
+    start_idx = content.find('generated_question_variants:')
+    if start_idx == -1:
+        return {base_question: []}
+    
+    relevant_content = content[start_idx:]
+    
+    # Regular expression to capture the question variants
+    pattern = r"\d+:(.*?)(?=\d+:|$)"
+    
+    # Find all matches in the content
+    matches = re.findall(pattern, relevant_content, re.DOTALL)
+    
+    # Strip whitespace and newlines from each match
+    variants = [match.strip() for match in matches]
+    
+    # Return the dictionary with base question as key and variants as values
+    return {base_question: variants}
+
 
 @app.post("/api/ollamaAGA")
 async def ollama_aga(request: QueryRequest):
@@ -837,85 +888,110 @@ async def ollama_aqg(request: QueryRequest):
 @app.post("/api/ollamaAFE")
 async def ollama_afe(request: QueryRequest):
     dimensions = {
+        "Knowledge of Content and Pedagogy": "Understanding the subject matter and employing effective teaching methods.\n"
+                                            "1: The transcript demonstrates minimal knowledge of content and ineffective pedagogical practices.\n"
+                                            "2: The transcript demonstrates basic content knowledge but lacks pedagogical skills.\n"
+                                            "3: The transcript demonstrates adequate content knowledge and uses some effective pedagogical practices.\n"
+                                            "4: The transcript demonstrates strong content knowledge and consistently uses effective pedagogical practices.\n"
+                                            "5: The transcript demonstrates exceptional content knowledge and masterfully employs a wide range of pedagogical practices.",
+
+        "Breadth of Coverage": "Extent to which the instructor covers the required curriculum.\n"
+                            "1: The transcript shows that the instructor covers minimal content with significant gaps in the curriculum.\n"
+                            "2: The transcript shows that the instructor covers some content but with notable gaps in the curriculum.\n"
+                            "3: The transcript shows that the instructor covers most of the required content with minor gaps.\n"
+                            "4: The transcript shows that the instructor covers all required content thoroughly.\n"
+                            "5: The transcript shows that the instructor covers all required content and provides additional enrichment material.",
+
+        "Knowledge of Resources": "Awareness and incorporation of teaching resources.\n"
+                                "1: The transcript shows that the instructor demonstrates minimal awareness of resources available for teaching.\n"
+                                "2: The transcript shows that the instructor demonstrates limited knowledge of resources and rarely incorporates them.\n"
+                                "3: The transcript shows that the instructor demonstrates adequate knowledge of resources and sometimes incorporates them.\n"
+                                "4: The transcript shows that the instructor demonstrates strong knowledge of resources and frequently incorporates them.\n"
+                                "5: The transcript shows that the instructor demonstrates extensive knowledge of resources and consistently incorporates a wide variety of them.",
+
+        "Content Clarity": "Ability to explain complex concepts clearly and effectively.\n"
+                        "1: Does not break down complex concepts, uses confusing, imprecise, and inappropriate language, and does not employ any relevant techniques or integrate them into the lesson flow.\n"
+                        "2: Inconsistently breaks down complex concepts using language that is sometimes confusing or inappropriate, employing few minimally relevant techniques that contribute little to student understanding, struggling to integrate them into the lesson flow.\n"
+                        "3: Generally breaks down complex concepts using simple, precise language and some techniques that are somewhat relevant and contribute to student understanding, integrating them into the lesson flow with occasional inconsistencies.\n"
+                        "4: Frequently breaks down complex concepts using simple, precise language and a variety of relevant, engaging techniques that contribute to student understanding.\n"
+                        "5: Consistently breaks down complex concepts using simple, precise language and a wide variety of highly relevant, engaging techniques such as analogies, examples, visuals, etc., seamlessly integrating them into the lesson flow.",
+
+        "Differentiation Strategies": "Using strategies to meet diverse student needs.\n"
+                                    "1: Uses no differentiation strategies to meet diverse student needs.\n"
+                                    "2: Uses minimal differentiation strategies with limited effectiveness.\n"
+                                    "3: Uses some differentiation strategies with moderate effectiveness.\n"
+                                    "4: Consistently uses a variety of differentiation strategies effectively.\n"
+                                    "5: Masterfully employs a wide range of differentiation strategies to meet the needs of all learners.",
+
         "Communication Clarity": "The ability to convey information and instructions clearly and effectively so that students can easily understand the material being taught.\n"
-                                "0: Instructions are often vague or confusing, leading to frequent misunderstandings among students.\n"
-                                "Example: 'Read the text and do the thing.'\n"
-                                "1: Occasionally provides clear instructions but often lacks detail, requiring students to ask for further clarification.\n"
-                                "Example: 'Read the chapter and summarize it.'\n"
-                                "2: Generally clear and detailed in communication, though sometimes slightly ambiguous.\n"
-                                "Example: 'Read chapter 3 and summarize the main points in 200 words.'\n"
-                                "3: Always communicates instructions and information clearly, precisely, and comprehensively, ensuring students fully understand what is expected.\n"
-                                "Example: 'Read chapter 3, identify the main points, and write a 200-word summary. Make sure to include at least three key arguments presented by the author.'",
+                                "1: Communicates poorly with students, leading to confusion and misunderstandings.\n"
+                                "2: Communicates with some clarity but often lacks precision or coherence.\n"
+                                "3: Communicates clearly most of the time, with occasional lapses in clarity.\n"
+                                "4: Consistently communicates clearly and effectively with students.\n"
+                                "5: Communicates with exceptional clarity, precision, and coherence, ensuring full understanding.",
 
-        "Punctuality": "Consistently starting and ending classes on time, as well as meeting deadlines for assignments and other class-related activities.\n"
-                    "0: Frequently starts and ends classes late, often misses deadlines for assignments and class-related activities.\n"
-                    "Example: Class is supposed to start at 9:00 AM but often begins at 9:15 AM, and assignments are returned late.\n"
-                    "1: Occasionally late to start or end classes and sometimes misses deadlines.\n"
-                    "Example: Class sometimes starts a few minutes late, and assignments are occasionally returned a day late.\n"
-                    "2: Generally punctual with minor exceptions, mostly meets deadlines.\n"
-                    "Example: Class starts on time 90%' of the time, and assignments are returned on the due date.\n"
-                    "3: Always starts and ends classes on time, consistently meets deadlines for assignments and other activities.\n"
-                    "Example: Class starts exactly at 9:00 AM every day, and assignments are always returned on the specified due date.",
+        "Punctuality": "Consistently starting and ending classes on time.\n"
+                    "1: Transcripts consistently show late class start times and/or early end times.\n"
+                    "2: Transcripts occasionally show late class start times and/or early end times.\n"
+                    "3: Transcripts usually show on-time class start and end times.\n"
+                    "4: Transcripts consistently show on-time class start and end times.\n"
+                    "5: Transcripts always show early class start times and full preparation to begin class on time.",
 
-        "Positivity": "Maintaining a positive attitude, providing encouragement, and fostering a supportive and optimistic learning environment.\n"
-                    "0: Rarely displays a positive attitude, often appears disengaged or discouraging.\n"
-                    "Example: Rarely smiles or offers encouragement, responds negatively to student questions.\n"
-                    "1: Occasionally positive, but can be inconsistent in attitude and support.\n"
-                    "Example: Sometimes offers praise but often seems indifferent.\n"
-                    "2: Generally maintains a positive attitude and provides encouragement, though with occasional lapses.\n"
-                    "Example: Usually offers praise and support but has off days.\n"
-                    "3: Consistently maintains a positive and encouraging attitude, always fostering a supportive and optimistic environment.\n"
-                    "Example: Always greets students warmly, frequently provides positive feedback and encouragement.",
+        "Managing Classroom Routines": "Implementing strategies to maintain order, minimize disruptions, and ensure a productive and respectful classroom environment.\n"
+                                    "1: Classroom routines are poorly managed, leading to confusion and lost instructional time.\n"
+                                    "2: Classroom routines are somewhat managed but with frequent disruptions.\n"
+                                    "3: Classroom routines are adequately managed with occasional disruptions.\n"
+                                    "4: Classroom routines are well-managed, leading to smooth transitions and minimal disruptions.\n"
+                                    "5: Classroom routines are expertly managed, maximizing instructional time and creating a seamless learning environment.",
 
-        "Personal Engagement": "Taking an active interest in each student's learning experience, addressing individual needs, and building meaningful connections with students.\n"
-                            "0: Shows little to no interest in individual students' learning experiences.\n"
-                            "Example: Rarely interacts with students one-on-one or addresses their unique needs.\n"
-                            "1: Occasionally engages with students on a personal level, but is often superficial.\n"
-                            "Example: Knows some students' names but rarely follows up on individual progress.\n"
-                            "2: Generally takes an interest in students' learning experiences and addresses individual needs, with some inconsistency.\n"
-                            "Example: Knows most students' names and occasionally checks in on their progress.\n"
-                            "3: Actively engages with each student, consistently addressing individual needs and building meaningful connections.\n"
-                            "Example: Knows all students by name, frequently checks in on their progress, and offers personalized support.",
-
-        "Classroom Management Practices": "Implementing strategies to maintain order, minimize disruptions, and ensure a productive and respectful classroom environment.\n"
-                                        "0: Lacks effective strategies, leading to frequent disruptions and a chaotic environment.\n"
-                                        "Example: Students often talk over the teacher, and the class frequently gets off-topic.\n"
-                                        "1: Occasionally implements management strategies but is often inconsistent, leading to some disruptions.\n"
-                                        "Example: Sometimes establishes rules, but often fails to enforce them.\n"
-                                        "2: Generally uses effective strategies to maintain order, with minor disruptions.\n"
-                                        "Example: Establishes rules and usually enforces them, with occasional lapses.\n"
-                                        "3: Consistently implements effective strategies, maintaining a productive and respectful environment.\n"
-                                        "Example: Establishes clear rules from day one, consistently enforces them, and quickly addresses any disruptions.",
+        "Managing Student Behavior": "Managing student behavior effectively to promote a positive and productive learning environment.\n"
+                                    "1: Struggles to manage student behavior, leading to frequent disruptions and an unproductive learning environment. Rarely encourages student participation, with little to no effort to ensure equal opportunities for engagement; provides no or inappropriate feedback and compliments that do not support learning or motivation.\n"
+                                    "2: Manages student behavior with limited effectiveness, with some disruptions and off-task behavior. Inconsistently encourages student participation, with unequal opportunities for engagement; provides limited or generic feedback and compliments that minimally support learning and motivation.\n"
+                                    "3: Manages student behavior adequately, maintaining a generally productive learning environment. Generally encourages student participation and provides opportunities for engagement, but some students may dominate or be overlooked; provides feedback and compliments, but they may not always be specific or constructive.\n"
+                                    "4: Effectively manages student behavior, promoting a positive and productive learning environment. Frequently encourages student participation, provides fair opportunities for engagement, and offers appropriate feedback and compliments that support learning and motivation.\n"
+                                    "5: Expertly manages student behavior, fostering a highly respectful, engaged, and self-regulated learning community. Consistently encourages active participation from all students, ensures equal opportunities for engagement, and provides specific, timely, and constructive feedback and compliments that enhance learning and motivation.",
 
         "Adherence to Rules": "Consistently following and enforcing classroom and school policies, ensuring that both the teacher and students abide by established guidelines.\n"
-                            "0: Frequently disregards classroom and school policies, leading to a lack of structure.\n"
-                            "Example: Often allows food in the classroom despite school policy.\n"
-                            "1: Occasionally follows and enforces rules but is inconsistent, causing confusion.\n"
-                            "Example: Enforces some rules strictly but ignores others.\n"
-                            "2: Generally adheres to and enforces rules, with minor inconsistencies.\n"
-                            "Example: Mostly follows and enforces policies, with occasional lapses.\n"
-                            "3: Always follows and strictly enforces classroom and school policies.\n"
-                            "Example: Consistently enforces no-phone policy and dress code.",
+                            "1: Consistently disregards or violates school rules and policies.\n"
+                            "2: Occasionally disregards or violates school rules and policies.\n"
+                            "3: Generally adheres to school rules and policies with occasional lapses.\n"
+                            "4: Consistently adheres to school rules and policies.\n"
+                            "5: Strictly adheres to school rules and policies and actively promotes compliance among students.",
 
-        "Classroom Atmosphere": "Creating a welcoming, inclusive, and comfortable environment that promotes learning and collaboration among students.\n"
-                                "0: Creates an unwelcoming or hostile environment, making students feel uncomfortable.\n"
-                                "Example: Classroom feels tense, and students are afraid to ask questions.\n"
-                                "1: Occasionally welcoming but often fails to create an inclusive or comfortable environment.\n"
-                                "Example: Some students feel included, but others do not.\n"
-                                "2: Generally creates a welcoming and inclusive environment, with minor exceptions.\n"
-                                "Example: Most students feel comfortable and included, but not all.\n"
-                                "3: Consistently fosters a welcoming, inclusive, and comfortable atmosphere.\n"
-                                "Example: All students feel safe, included, and encouraged to participate.",
+        "Organization": "Organizing and presenting content in a structured and logical manner.\n"
+                        "1: Transcripts indicate content that is poorly organized, with minimal structure and no clear emphasis on important content. Linking between content is absent or confusing.\n"
+                        "2: Transcripts indicate content that is somewhat organized but lacks a consistent structure and comprehensive coverage. Emphasis on important content is inconsistent, and linking between content is weak.\n"
+                        "3: Transcripts indicate content that is adequately organized, with a generally clear structure and comprehensive coverage. Important content is usually emphasized, and linking between content is present.\n"
+                        "4: Transcripts indicate content that is well-organized, with a consistent and clear structure and comprehensive coverage. Important content is consistently emphasized, and linking between content is effective.\n"
+                        "5: Transcripts indicate content that is exceptionally well-organized, with a highly structured, logical, and comprehensive presentation. Important content is strategically emphasized, and linking between content is seamless and enhances learning.",
 
-        "Student Participation": "Encouraging and facilitating active involvement from all students in class discussions, activities, and assignments.\n"
-                                "0: Rarely encourages or facilitates student involvement, resulting in minimal participation.\n"
-                                "Example: Few students ever raise their hands or engage in discussions.\n"
-                                "1: Occasionally encourages participation but lacks consistency, leading to uneven involvement.\n"
-                                "Example: Encourages participation during some activities but not others.\n"
-                                "2: Generally encourages and facilitates active involvement, with some students more engaged than others.\n"
-                                "Example: Most students participate regularly, but a few remain disengaged.\n"
-                                "3: Consistently encourages and ensures active involvement from all students.\n"
-                                "Example: Uses various strategies to engage all students, such as group discussions and interactive activities."
+        "Clarity of Instructional Objectives": "Presenting content clearly and effectively to facilitate understanding and mastery.\n"
+                                            "1: Content is presented in a confusing or unclear manner.\n"
+                                            "2: Content is presented with some clarity but with frequent gaps or inconsistencies.\n"
+                                            "3: Content is presented with adequate clarity, allowing for general understanding.\n"
+                                            "4: Content is presented with consistent clarity, promoting deep understanding.\n"
+                                            "5: Content is presented with exceptional clarity, facilitating mastery and transfer of knowledge.",
+
+        "Alignment with the Curriculum": "Ensuring instruction aligns with curriculum standards and covers required content.\n"
+                                        "1: Instruction is poorly aligned with the curriculum, with significant gaps or deviations.\n"
+                                        "2: Instruction is somewhat aligned with the curriculum but with frequent inconsistencies.\n"
+                                        "3: Instruction is generally aligned with the curriculum, covering most required content.\n"
+                                        "4: Instruction is consistently aligned with the curriculum, covering all required content.\n"
+                                        "5: Instruction is perfectly aligned with the curriculum, covering all required content and providing meaningful extensions.",
+
+        "Instructor Enthusiasm And Positive Demeanor": "Exhibiting a positive attitude and enthusiasm for teaching, inspiring student engagement.\n"
+                                                    "1: Instructor exhibits a negative or indifferent demeanor and lacks enthusiasm for teaching.\n"
+                                                    "2: Instructor exhibits a neutral demeanor and occasional enthusiasm for teaching.\n"
+                                                    "3: Instructor exhibits a generally positive demeanor and moderate enthusiasm for teaching.\n"
+                                                    "4: Instructor exhibits a consistently positive demeanor and strong enthusiasm for teaching.\n"
+                                                    "5: Instructor exhibits an exceptionally positive demeanor and infectious enthusiasm for teaching, greatly inspiring student engagement.",
+
+        "Awareness and Responsiveness to Student Needs": "Demonstrating attentiveness and responding appropriately to student needs and feedback.\n"
+                                                        "1: Lacks awareness of or fails to respond to student needs and feedback.\n"
+                                                        "2: Occasionally demonstrates awareness of and responds to student needs and feedback.\n"
+                                                        "3: Generally demonstrates awareness of and responds to student needs and feedback.\n"
+                                                        "4: Consistently demonstrates awareness of and responds to student needs and feedback.\n"
+                                                        "5: Highly attuned to and proactively responds to student needs and feedback, fostering a supportive learning environment."
     }
 
 
