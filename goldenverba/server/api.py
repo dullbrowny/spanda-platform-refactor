@@ -1,4 +1,4 @@
-from fastapi import FastAPI, WebSocket, status, HTTPException
+from fastapi import FastAPI, WebSocket, File, UploadFile, status, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -7,8 +7,12 @@ from httpx import AsyncClient
 import asyncio
 import json
 import httpx
-import re
+import re , asyncio
 import ollama
+from pydantic import BaseModel
+import base64
+import logging 
+from typing import List
 
 import os
 from pathlib import Path
@@ -243,6 +247,7 @@ async def import_data(payload: ImportPayload):
 
     logging = []
 
+    print(f"Received payload: {payload}")
     if production:
         logging.append(
             {"type": "ERROR", "message": "Can't import when in production mode"}
@@ -1014,6 +1019,425 @@ async def ollama_afe(request: QueryRequest):
     
     print("SCORES:")
     print(json.dumps(all_scores, indent=2))
+    response = {
+        "DOCUMENT": all_responses,
+        "SCORES": all_scores
+    }
+    
+    return response
+
+
+
+
+
+
+# Modified import endpoint to handle transcript uploads
+@app.post("/api/importTranscript")
+async def import_transcript(transcript_data: UploadFile = File(...)):
+    try:
+        contents = await transcript_data.file.read()
+
+        # Convert to Base64
+        base64_content = base64.b64encode(contents).decode('utf-8')
+
+        # Upload to Weaviate using the existing endpoint
+        upload_to_weaviate(base64_content, transcript_data.filename)
+
+        return JSONResponse(content={"message": "Transcript uploaded successfully"})
+    except ValidationError as e:
+        # Handle validation errors
+        return JSONResponse(content={"error": e.errors()}, status_code=422)
+    except HTTPException as e:
+        raise e  # Reraise the exception if it's a Weaviate import failure
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+class FileData(BaseModel):
+    filename: str
+    extension: str
+    content: str
+
+class ImportPayload(BaseModel):
+    data: list[FileData]
+    textValues: list
+    config: dict
+
+class QueryRequest(BaseModel):
+    query: str
+
+@app.post("/api/upload_transcript")
+async def upload_transcript(payload: ImportPayload):
+    try:
+        for file_data in payload.data:
+            file_content = base64.b64decode(file_data.content)
+            with open(file_data.filename, "wb") as file:
+                file.write(file_content)
+        
+        logging = []
+
+        print(f"Received payload: {payload}")
+        if production:
+            logging.append(
+                {"type": "ERROR", "message": "Can't import when in production mode"}
+            )
+            return JSONResponse(
+                content={
+                    "logging": logging,
+                }
+            )
+
+        try:
+            set_config(manager, payload.config)
+            documents, logging = manager.import_data(
+                payload.data, payload.textValues, logging
+            )
+
+            return JSONResponse(
+                content={
+                    "logging": logging,
+                }
+            )
+
+        except Exception as e:
+            logging.append({"type": "ERROR", "message": str(e)})
+            return JSONResponse(
+                content={
+                    "logging": logging,
+                }
+            )
+
+
+    except Exception as e:
+        print(f"Error during import: {e}")
+        raise HTTPException(status_code=500, detail="Error processing the file")
+    
+@app.post("/api/evaluate_Transcipt")
+async def evaluate_Transcipt(request: QueryRequest):
+    dimensions = {
+        "Communication Clarity": "The ability to convey information and instructions clearly and effectively so that students can easily understand the material being taught.\n"
+                                "0: Instructions are often vague or confusing, leading to frequent misunderstandings among students.\n"
+                                "Example: 'Read the text and do the thing.'\n"
+                                "1: Occasionally provides clear instructions but often lacks detail, requiring students to ask for further clarification.\n"
+                                "Example: 'Read the chapter and summarize it.'\n"
+                                "2: Generally clear and detailed in communication, though sometimes slightly ambiguous.\n"
+                                "Example: 'Read chapter 3 and summarize the main points in 200 words.'\n"
+                                "3: Always communicates instructions and information clearly, precisely, and comprehensively, ensuring students fully understand what is expected.\n"
+                                "Example: 'Read chapter 3, identify the main points, and write a 200-word summary. Make sure to include at least three key arguments presented by the author.'",
+
+        "Punctuality": "Consistently starting and ending classes on time, as well as meeting deadlines for assignments and other class-related activities.\n"
+                    "0: Frequently starts and ends classes late, often misses deadlines for assignments and class-related activities.\n"
+                    "Example: Class is supposed to start at 9:00 AM but often begins at 9:15 AM, and assignments are returned late.\n"
+                    "1: Occasionally late to start or end classes and sometimes misses deadlines.\n"
+                    "Example: Class sometimes starts a few minutes late, and assignments are occasionally returned a day late.\n"
+                    "2: Generally punctual with minor exceptions, mostly meets deadlines.\n"
+                    "Example: Class starts on time 90%' of the time, and assignments are returned on the due date.\n"
+                    "3: Always starts and ends classes on time, consistently meets deadlines for assignments and other activities.\n"
+                    "Example: Class starts exactly at 9:00 AM every day, and assignments are always returned on the specified due date.",
+
+        "Positivity": "Maintaining a positive attitude, providing encouragement, and fostering a supportive and optimistic learning environment.\n"
+                    "0: Rarely displays a positive attitude, often appears disengaged or discouraging.\n"
+                    "Example: Rarely smiles or offers encouragement, responds negatively to student questions.\n"
+                    "1: Occasionally positive, but can be inconsistent in attitude and support.\n"
+                    "Example: Sometimes offers praise but often seems indifferent.\n"
+                    "2: Generally maintains a positive attitude and provides encouragement, though with occasional lapses.\n"
+                    "Example: Usually offers praise and support but has off days.\n"
+                    "3: Consistently maintains a positive and encouraging attitude, always fostering a supportive and optimistic environment.\n"
+                    "Example: Always greets students warmly, frequently provides positive feedback and encouragement.",
+
+    }
+
+
+    instructor_name = request.query
+
+    all_responses = {}
+    all_scores = {}
+
+    for dimension, explanation in dimensions.items():
+        query = f"Judge document name {instructor_name} based on {dimension}."
+        context = await make_request(query)  # Assuming make_request is defined elsewhere to get the context
+        # print(f"CONTEXT for {dimension}:")
+        # print(context)  # Print the context generated
+        result_responses, result_scores = await instructor_eval(instructor_name, context, dimension, explanation)
+        print(result_responses)
+        print(result_scores)
+        # Extract only the message['content'] part and store it
+        all_responses[dimension] = result_responses[dimension]['message']['content']
+        all_scores[dimension] = result_scores[dimension]
+    
+    print("SCORES:")
+    print(json.dumps(all_scores, indent=2))
+    response = {
+        "DOCUMENT": all_responses,
+        "SCORES": all_scores
+    }
+    
+    return response
+
+async def resume_eval(resume_name, jd_name, context, score_criterion, explanation):
+    user_context = "".join(context)
+    responses = {}
+    scores_dict = {}
+
+    evaluate_instructions = f"""
+        [INST]
+        -Instructions:
+            You are tasked with evaluating a resume named {resume_name} in comparison to a job description named {jd_name} based on the criterion: {score_criterion} - {explanation}.
+
+        -Evaluation Details:
+            -Focus exclusively on the provided resume and job description.
+            -Assign scores from 0 to 3:
+                0: Poor performance
+                1: Average performance
+                2: Good performance
+                3: Exceptional performance
+        -Criteria:
+            -Criterion Explanation: {explanation}
+            -If the resume and job description lack sufficient information to judge {score_criterion}, mark it as N/A and provide a clear explanation.
+            -Justify any score that is not a perfect 3.
+
+        Strictly follow the output format-
+        -Output Format:
+            -{score_criterion}: Score: score(range of 0 to 3, or N/A)
+
+            -Detailed Explanation with Examples and justification for examples:
+                -Example 1: "[Quoted text from resume/job description]" [Description]
+                -Example 2: "[Quoted text from resume/job description]" [Description]
+                -Example 3: "[Quoted text from resume/job description]" [Description]
+                -...
+                -Example n: "[Quoted text from resume/job description]" [Description]
+            -Include both positive and negative instances.
+            -Highlight poor examples if the score is not ideal.
+
+            -Consider the context surrounding the example statements, as the context in which a statement is made is extremely important.
+
+            Rate strictly on a scale of 0 to 3 using whole numbers only.
+
+            Ensure the examples are directly relevant to the evaluation criterion and discard any irrelevant excerpts.
+        [/INST]
+    """
+    system_message = """This is a chat between a user and a judge. The judge gives helpful, detailed, and polite suggestions for improvement for a candidate's resume based on the given context - the context contains resumes and job descriptions. The assistant should also indicate when the judgement be found in the context."""
+
+    formatted_context = f"""Here are given documents:
+                    [RESUME START]
+                    {user_context}
+                    [RESUME END]
+                    [JOB DESCRIPTION START]
+                    {user_context}
+                    [JOB DESCRIPTION END]"""
+
+    user_prompt = f"""Please provide an evaluation of the resume named '{resume_name}' in comparison to the job description named '{jd_name}' on the following criteria: '{score_criterion}'. Only include information from the provided documents."""
+
+    payload = {
+        "messages": [
+            {
+                "role": "system",
+                "content": system_message
+            },
+            {
+                "role": "user",
+                "content": formatted_context + "/n/n" + evaluate_instructions + "/n/n" + user_prompt + " Strictly follow the format of output provided."
+            }
+        ],
+        "stream": False,
+        "options": {
+            "top_k": 1,
+            "top_p": 1,
+            "temperature": 0,
+            "seed": 100
+        }
+    }
+
+    response = await asyncio.to_thread(ollama.chat, model='llama3', messages=payload['messages'], stream=payload['stream'])
+    responses[score_criterion] = response
+    content = response['message']['content']
+
+    pattern = rf'(score:\s*([\s\S]*?)(\d+)|\**{score_criterion}\**\s*:\s*(\d+))'
+    match = re.search(pattern, content, re.IGNORECASE)
+
+    if match:
+        if match.group(3):
+            score_value = match.group(3).strip()
+        elif match.group(4):
+            score_value = match.group(4).strip()
+        else:
+            score_value = "N/A"
+        scores_dict[score_criterion] = score_value
+    else:
+        scores_dict[score_criterion] = "N/A"
+
+    return responses, scores_dict
+
+
+# Define the extract_score function
+def extract_score(response_content):
+    # Regular expression to find the score in the response
+    score_match = re.search(r'Score:\s*(\d+|N/A)', response_content)
+    if score_match:
+        score = score_match.group(1)
+        if score == 'N/A':
+            return score
+        return int(score)
+    return None
+
+async def resume_eval(resume_name, jd_name, context, score_criterion, explanation):
+    user_context = "".join(context)
+    responses = {}
+    scores_dict = {}
+
+    evaluate_instructions = f"""
+        [INST]
+        -Instructions:
+            You are tasked with evaluating a candidate's resume in comparison to a job description based on the criterion: {score_criterion} - {explanation}.
+
+        -Evaluation Details:
+            -Focus exclusively on the provided resume and job description.
+            -Assign scores from 0 to 3:
+                0: Poor performance
+                1: Average performance
+                2: Good performance
+                3: Exceptional performance
+        -Criteria:
+            -Criterion Explanation: {explanation}
+            -If the resume lacks sufficient information to judge {score_criterion}, mark it as N/A and provide a clear explanation.
+            -Justify any score that is not a perfect 3.
+
+        Strictly follow the output format-
+        -Output Format:
+            -{score_criterion}: Score: score(range of 0 to 3, or N/A)
+
+            -Detailed Explanation with Examples and justification for examples:
+                -Example 1: "[Quoted text from resume or job description]" [Description]
+                -Example 2: "[Quoted text from resume or job description]" [Description]
+                -Example 3: "[Quoted text from resume or job description]" [Description]
+                -...
+                -Example n: "[Quoted text from resume or job description]" [Description]
+            -Include both positive and negative instances.
+            -Highlight poor examples if the score is not ideal.
+
+            -Consider the context surrounding the example statements, as the context in which a statement is made is extremely important.
+
+            Rate strictly on a scale of 0 to 3 using whole numbers only.
+
+            Ensure the examples are directly relevant to the evaluation criterion and discard any irrelevant excerpts.
+        [/INST]
+    """
+    system_message = """This is a chat between a user and a judge. The judge gives helpful, detailed, and polite suggestions for improvement for a particular candidate from the given context - the context contains resumes and job descriptions. The assistant should also indicate when the judgment is found in the context."""
+    
+    formatted_documents = f"""Here are the given documents for {resume_name} and {jd_name}:
+                    [RESUME START]
+                    {user_context}
+                    [RESUME END]
+                    [JOB DESCRIPTION START]
+                    {user_context}
+                    [JOB DESCRIPTION END]"""
+    
+    user_prompt = f"""Please provide an evaluation of the candidate named '{resume_name}' in comparison to the job description named '{jd_name}' on the following criteria: '{score_criterion}'. Only include information from the resume and job description where '{resume_name}' is the candidate."""
+
+    payload = {
+        "messages": [
+            {
+                "role": "system",
+                "content": system_message
+            },
+            {
+                "role": "user",
+                "content": formatted_documents + "\n\n" + evaluate_instructions + "\n\n" + user_prompt
+            }
+        ],
+        "stream": False  # Assuming that streaming is set to False, adjust based on your implementation
+    }
+
+    eval_response = await asyncio.to_thread(ollama.chat, model='llama3', messages=payload['messages'])  # Assuming chat function is defined to handle the completion request
+
+    # Log the eval_response to see its structure
+    print("eval_response:", eval_response)
+    
+    try:
+        eval_response_content = eval_response['message']['content']
+    except KeyError as e:
+        raise KeyError(f"Expected key 'message' not found in response: {eval_response}")
+
+    response = {
+        score_criterion: {
+            "message": {
+                "content": eval_response_content
+            }
+        }
+    }
+    score = extract_score(eval_response_content)
+    scores_dict[score_criterion] = score
+
+    return response, scores_dict
+
+
+
+class QueryRequest(BaseModel):
+    query: List[str]
+
+@app.post("/api/evaluate_Resume")
+async def evaluate_Resume(request: QueryRequest):
+    if len(request.query) != 2:
+        raise HTTPException(status_code=400, detail="Invalid request format. Expected two items in query list.")
+    
+    resume_name, jd_name = request.query
+    dimensions = {
+        "Qualification Match": "The extent to which the candidate's educational background, certifications, and experience align with the specific requirements outlined in the job description.\n"
+            "0: Qualifications are largely unrelated to the position.\n"
+            "Example: The job requires a Master's degree in Computer Science, but the candidate has a Bachelor's in History.\n"
+            "1: Some relevant qualifications but significant gaps exist.\n"
+            "Example: The candidate has a Bachelor's in Computer Science but lacks the required 3 years of industry experience.\n"
+            "2: Mostly meets the qualifications with minor gaps.\n"
+            "Example: The candidate meets most qualifications but lacks experience with a specific programming language mentioned in the job description.\n"
+            "3: Exceeds qualifications, demonstrating additional relevant skills or experience.\n"
+            "Example: The candidate exceeds the required experience and has additional certifications in relevant areas.",
+        "Experience Relevance": "The degree to which the candidate's prior teaching, research, or industry experience is relevant to the courses they would be teaching.\n"
+            "0: Little to no relevant experience in the subject matter.\n"
+            "Example: The candidate has no prior experience teaching or working with the programming languages listed in the course syllabus.\n"
+            "1: Some relevant experience but mostly in unrelated areas.\n"
+            "Example: The candidate has experience in web development but the course focuses on mobile app development.\n"
+            "2: Solid experience in related fields but limited direct experience in the specific subject.\n"
+            "Example: The candidate has taught general computer science courses but not the specific advanced algorithms course they are applying for.\n"
+            "3: Extensive experience directly teaching or working in the subject area.\n"
+            "Example: The candidate has 5+ years of experience teaching the specific course they are applying for and has published research in the field.",
+        "Skillset Alignment": "How well the candidate's demonstrated skills (e.g., technical skills, communication, leadership) match the required competencies for the role.\n"
+            "0: Skills are largely misaligned with the job requirements.\n"
+            "Example: The job requires strong communication and presentation skills, but the candidate has no experience presenting or leading workshops.\n"
+            "1: Possesses some required skills but lacks others.\n"
+            "Example: The candidate has strong technical skills but lacks experience with collaborative project management tools.\n"
+            "2: Demonstrates most of the required skills with some room for improvement.\n"
+            "Example: The candidate has good communication skills but could benefit from additional training in public speaking.\n"
+            "3: Possesses all required skills and demonstrates advanced abilities in some areas.\n"
+            "Example: The candidate has excellent technical skills, is a highly effective communicator, and has a proven track record of mentoring junior developers.",
+        "Potential Impact": "An assessment of the candidate's potential to contribute positively to the department and the institution as a whole, based on their resume and cover letter.\n"
+            "0: Unclear or negative potential impact based on application materials.\n"
+            "Example: The candidate's application materials are vague and do not highlight any specific contributions they could make.\n"
+            "1: Potential for minimal impact or contribution.\n"
+            "Example: The candidate's resume shows basic qualifications but no indication of going above and beyond.\n"
+            "2: Demonstrates potential for moderate positive impact.\n"
+            "Example: The candidate has experience with relevant projects and expresses enthusiasm for contributing to the department's research initiatives.\n"
+            "3: Shows strong potential to significantly impact the department and institution through teaching, research, or other activities.\n"
+            "Example: The candidate has a strong publication record, outstanding references, and a clear vision for how they would enhance the curriculum.",
+        "Overall Fit": "A holistic assessment of how well the candidate aligns with the department's culture, values, and long-term goals.\n"
+            "0: Poor overall fit with the department.\n"
+            "Example: The candidate's values and goals conflict with the department's focus on collaborative learning.\n"
+            "1: Some alignment but significant differences in values or goals.\n"
+            "Example: The candidate is passionate about research but the department prioritizes teaching excellence.\n"
+            "2: Good fit with some areas of potential misalignment.\n"
+            "Example: The candidate aligns well with most of the department's values but has a different teaching style than is typical for the institution.\n"
+            "3: Excellent fit with the department's culture, values, and goals.\n"
+            "Example: The candidate's teaching philosophy, research interests, and collaborative spirit perfectly complement the department's existing strengths and future aspirations."
+    }
+
+    all_responses = {}
+    all_scores = {}
+
+    for dimension, explanation in dimensions.items():
+        query = f"Judge Resume named {resume_name} in comparison to Job Description named {jd_name} based on {dimension}."
+        context = await make_request(query)  # Assuming make_request is defined elsewhere to get the context
+        result_responses, result_scores = await resume_eval(resume_name, jd_name, context, dimension, explanation)
+        all_responses[dimension] = result_responses[dimension]['message']['content']
+        all_scores[dimension] = result_scores[dimension]
+    
     response = {
         "DOCUMENT": all_responses,
         "SCORES": all_scores
