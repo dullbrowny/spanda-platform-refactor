@@ -62,7 +62,8 @@ origins = [
     "https://verba-golden-ragtriever.onrender.com",
     "http://localhost:8000",
     "http://localhost:1511",
-    "http://localhost:1511/courses/s24/sample/gradingAssistant",
+    "http://localhost/moodle", 
+    "http://localhost",  
 ]
 
 # Add middleware for handling Cross Origin Resource Sharing (CORS)
@@ -798,17 +799,7 @@ async def generate_question_variants(base_question, context):
             4. With an initial score of 6 and a multiplier of 0.25, calculate which song is the most popular based on this stream of plays: SongX, SongY, SongX, SongZ, SongY, SongX, SongZ, SongY, SongX, SongZ?
             5. Given an initial score of 4.5 and a multiplier of 0.3, determine which TV show is the most watched based on the following sequence of episodes: Show1, Show2, Show1, Show3, Show2, Show1, Show3, Show2, Show1, Show3?
 
-            Explanation: NOTE that no two variants must be dependent on each other, each and every variant needs to be a seperate question which can be answered just by looking at the particular variant, and no external data.
-            Notice how the the numerical values are changing, it is extremely important for the numerical values to change. If there is a sequence, it will change too. It is essential that the numerical values are different for each variant. The generated questions are similar to the originals but rephrased using different wording or focusing on a different aspect of the problem (area vs. perimeter, speed vs. time).
-            
-            Strictly follow the format for your responses:
-            generated_question_variants:
-            1:Variant 1
-            2:Variant 2
-            3:Variant 3
-            ..
-            ..
-            n:Variant n
+            Explanation: Notice how the the numerical values are changing, it is extremely important for the numerical values to change. If there is a sequence, it will change too. It is essential that the numerical values are different for each variant. The generated questions are similar to the originals but rephrased using different wording or focusing on a different aspect of the problem (area vs. perimeter, speed vs. time).
             [/INST]
         """
 
@@ -821,7 +812,17 @@ async def generate_question_variants(base_question, context):
             },
             {
                 "role": "user",
-                "content": f"'{base_question}'",
+                "content": f"""
+                '{base_question}'. Alo NOTE that no two variants must be dependent on each other, each and every variant needs to be a seperate question which can be answered just by looking at the particular variant, and no external data. 
+                Strictly follow the format for your responses:
+                    generated_question_variants:
+                    1.
+                    2.
+                    3.
+                    ..
+                    ..
+                    n.
+                    """,
             }
         ],
         "stream": False,
@@ -834,7 +835,7 @@ async def generate_question_variants(base_question, context):
     }
 
     # Asynchronous call to Ollama API
-    response = await asyncio.to_thread(ollama_chat, model='dolphin-llama3', messages=payload['messages'], stream=payload['stream'])
+    response = await asyncio.to_thread(ollama_chat, model='llama3', messages=payload['messages'], stream=payload['stream'])
     print(response)
     content = response['message']['content']    
 
@@ -844,21 +845,14 @@ async def generate_question_variants(base_question, context):
     return response['message']['content'], variants_dict
 
 def extract_variants(base_question, content):
-    # Isolate the section starting from 'generated_question_variants'
-    start_idx = content.find('generated_question_variants:')
-    if start_idx == -1:
-        return {base_question: []}
+    # Regular expression to capture numbered or symbol-led variants
+    pattern = r"^\s*(?:\d+[:.)\s-]+)(.*)$"
     
-    relevant_content = content[start_idx:]
+    # Find all matches using the pattern
+    matches = re.findall(pattern, content, re.MULTILINE)
     
-    # Regular expression to capture the question variants
-    pattern = r"\d+:(.*?)(?=\d+:|$)"
-    
-    # Find all matches in the content
-    matches = re.findall(pattern, relevant_content, re.DOTALL)
-    
-    # Strip whitespace and newlines from each match
-    variants = [match.strip() for match in matches]
+    # Extract the variants from the matches
+    variants = [match.strip() for match in matches if match.strip()]
     
     # Return the dictionary with base question as key and variants as values
     return {base_question: variants}
@@ -887,7 +881,7 @@ async def ollama_aqg(request: QueryRequest):
         "variants": variants,
         "variants_dict": variants_dict
     }
-    return {"variants": variants}
+    return response
 
 
 @app.post("/api/ollamaAFE")
