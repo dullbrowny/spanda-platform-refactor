@@ -740,90 +740,78 @@ async def generate_question_variants(base_question, context):
     user_context = " ".join(context)
 
     base_question_gen = f"""
-    <s> [INST] As an inventive educator dedicated to nurturing critical thinking skills, your task is to devise a series of a number of distinct iterations of a mathematical problem or a textual problem. Each iteration should be rooted in a fundamental problem-solving technique, but feature diverse numerical parameters and creatively reworded text to discourage students from sharing answers. Your objective is to generate a collection of unique questions that not only promote critical thinking but also thwart easy duplication of solutions. Ensure that each variant presents different numerical values, yielding disparate outcomes. Each question should have its noun labels changed. Additionally, each question should stand alone without requiring reference to any other question, although they may share the same solving concept. Your ultimate aim is to fashion an innovative array of challenges that captivate students and inspire analytical engagement.
-    Strictly ensure that the questions are relevant to the following context-
+    <s> [INST] You are a creative problem designer specializing in creating diverse variants of educational problems. Your objective is to produce unique versions of a given problem by altering numerical parameters, contexts, and wording to prevent straightforward answer sharing. Each variant should be based on the same core concept but presented in a way that makes each problem distinct and challenging.
+
+    Focus on maintaining the educational intent while providing varied contexts and scenarios. Make sure each problem is self-contained and does not rely on the original problem statement. Use the following context to guide your creation:
+
     [CONTEXT START]
     {context}
     [CONTEXT END]
 
-    Here are a few examples from which you can learn on how to generate these variants.
-    Example 1:
-    Original Question: What are the implications of Kant's categorical imperative on modern ethical theory?
-    generated_question_variants:
-    1. How does Kant's categorical imperative shape contemporary discussions in normative ethics?
-    2. In what ways does Kant's notion of the categorical imperative influence current ethical frameworks?
-    3. Can Kant's categorical imperative be reconciled with utilitarian principles in modern ethical debates?
-    4. How do modern deontologists interpret Kant's categorical imperative in the context of bioethics?
-    5. What are the contemporary criticisms of applying Kant's categorical imperative to global justice issues?
-    6. How does Kant's categorical imperative inform the ethical considerations in artificial intelligence development?
+    Here are a few examples to illustrate the process:
 
-    -These are advanced discussion prompts for graduate-level philosophy seminars.
+    Example 1:
+    Original Question: Analyze the impact of climate change on coastal cities.
+
+    Generated Question Variants:
+    1. Discuss how rising sea levels due to climate change affect coastal urban infrastructure.
+    2. Evaluate the economic implications of climate change-induced flooding in coastal areas.
+    3. How does climate change influence the frequency and intensity of storms in coastal regions?
+    4. Assess the challenges faced by coastal communities in adapting to climate change.
+    5. What measures can coastal cities implement to mitigate the effects of climate change?
 
     Example 2:
-    Original Question: What is the molarity of a solution containing 5 moles of solute in 2 liters of solution?
-    generated_question_variants:
-    1. What is the molarity of a solution containing 3 moles of solute in 1.5 liters of solution?
-    2. Calculate the molarity of a solution with 8 moles of solute in 4 liters of solution.
-    3. If a solution contains 6 moles of solute in 3 liters of solution, what is its molarity?
-    4. Determine the molarity of a solution with 2 moles of solute in 0.5 liters of solution.
-    5. What is the molarity of a solution with 7 moles of solute in 2.5 liters of solution?
-    6. Calculate the molarity of a solution containing 4 moles of solute in 1 liter of solution.
+    Original Question: Calculate the molarity of a solution with 5 moles of solute in 2 liters of solution.
 
-    -These are specialized numerical questions for advanced chemistry courses.
+    Generated Question Variants:
+    1. Determine the molarity of a solution containing 4 moles of solute in 1.5 liters of solution.
+    2. Find the molarity of a solution with 7 moles of solute in 3 liters of solution.
+    3. What is the molarity of a solution with 2.5 moles of solute in 1 liter of solution?
+    4. Calculate the molarity of a solution containing 6 moles of solute in 2.5 liters of solution.
+    5. If a solution has 8 moles of solute in 4 liters, what is its molarity?
 
     Example 3:
-    Original Question:
-    Calculate the sequence of prime numbers up to 50. Show the order of the prime numbers in the sequence - 2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47.
-    generated_question_variants:
-    1. Determine the sequence of Fibonacci numbers up to the 10th term. Show the order of the Fibonacci numbers in the sequence - 0, 1, 1, 2, 3, 5, 8, 13, 21, 34.
-    2. Identify the sequence of even numbers from 2 to 20. Show the order of the even numbers in the sequence - 2, 4, 6, 8, 10, 12, 14, 16, 18, 20.
-    3. Calculate the sequence of squares of the first 10 natural numbers. Show the order of the squares in the sequence - 1, 4, 9, 16, 25, 36, 49, 64, 81, 100.
-    4. Determine the sequence of powers of 2 up to \(2^(10)\). Show the order of the powers of 2 in the sequence - 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024.
-    5. Identify the sequence of triangular numbers up to the 10th term. Show the order of the triangular numbers in the sequence - 1, 3, 6, 10, 15, 21, 28, 36, 45, 55.
+    Original Question: Sequence the first 10 prime numbers.
 
-    -These are advanced pseudo-code problems for computer science students focusing on streaming algorithms.
+    Generated Question Variants:
+    1. List the first 10 Fibonacci numbers in order.
+    2. Identify the first 10 even numbers in sequence.
+    3. What are the first 10 square numbers?
+    4. Provide the first 10 terms of the geometric sequence starting with 1 and ratio 2.
+    5. Sequence the first 10 odd numbers.
 
     Example 4:
-    Original Question: Utilizing an initial score of 5 and a multiplier of 0.2, determine which product is the most popular based on this sequence of ratings: A, B, A, C, B, A, C, B, A, B?
-    generated_question_variants:
-    1. Given an initial score of 3 and a multiplier of 0.1, identify which app is the most downloaded based on this sequence of reviews: X, Y, Z, X, X, Y, Z, X, Y, Z?
-    2. With an initial score of 4 and a multiplier of 0.15, determine which book is the most read based on this series of mentions: Book1, Book2, Book1, Book3, Book2, Book1, Book3, Book2, Book1, Book3?
-    3. Using an initial score of 2 and a multiplier of 0.05, find which movie is the highest rated based on the following set of ratings: MovieA, MovieB, MovieA, MovieC, MovieB, MovieA, MovieC, MovieB, MovieA, MovieB?
-    4. With an initial score of 6 and a multiplier of 0.25, calculate which song is the most popular based on this stream of plays: SongX, SongY, SongX, SongZ, SongY, SongX, SongZ, SongY, SongX, SongZ?
-    5. Given an initial score of 4.5 and a multiplier of 0.3, determine which TV show is the most watched based on the following sequence of episodes: Show1, Show2, Show1, Show3, Show2, Show1, Show3, Show2, Show1, Show3?
+    Original Question: If a score of 5 is multiplied by 0.2, which product is most popular based on these ratings: A, B, A, C, B, A, C, B, A, B?
 
-    Explanation: Notice how the the numerical values are changing, it is extremely important for the numerical values to change. If there is a sequence, it will change too. It is essential that the numerical values are different for each variant. The generated questions are similar to the originals but rephrased using different wording or focusing on a different aspect of the problem (area vs. perimeter, speed vs. time).
-
+    Generated Question Variants:
+    1. With an initial score of 3 and a multiplier of 0.1, which app has the highest rating based on these reviews: X, Y, Z, X, X, Y, Z, X, Y, Z?
+    2. Given a starting score of 4 and a multiplier of 0.15, identify the most popular book from this series of mentions: Book1, Book2, Book1, Book3, Book2, Book1, Book3, Book2, Book1, Book3?
+    3. Using an initial score of 2 and a multiplier of 0.05, determine the top-rated movie from these ratings: MovieA, MovieB, MovieA, MovieC, MovieB, MovieA, MovieC, MovieB, MovieA, MovieB?
+    4. With an initial score of 6 and a multiplier of 0.25, which song is most popular based on these plays: SongX, SongY, SongX, SongZ, SongY, SongX, SongZ, SongY, SongX, SongZ?
+    5. Given a score of 4.5 and a multiplier of 0.3, find the most watched TV show from these episodes: Show1, Show2, Show1, Show3, Show2, Show1, Show3, Show2, Show1, Show3?
 
     Example 5:
-    Please generate 5 variants of the original question.
-    Rishkesh’s business owns thousands of Coke vending machines and would like to make them social. He wants his machines to tweet and sent push notifications with special offers to consumers who are geographically close. If the closest vending machine doesn’t have stock to offer, it should recommend the next closest vending machine that can offer the consumer a deal. [4]
-        a) What would happen if link between collection tier and analysis tier is interrupted for an extended period of time? How it can be mitigated? [2]
-        b) Would you anticipate need to store historical data? Why? [1]
-        c) What type of message delivery semantics does this streaming system needs? [1]
+    Original Question:
+    A company uses a network of vending machines to send offers to nearby customers. If a machine is out of stock, it refers customers to the next nearest machine. [4]
+    a) What happens if the connection between the data collection and analysis tiers is interrupted? How can this be mitigated? [2]
+    b) Is storing historical data necessary? Why? [1]
+    c) What message delivery semantics does this system require? [1]
 
-    generated_question_variants:
-    1.Examine the following passage and respond to the subsequent questions:
-    "Rishkesh’s business owns thousands of Coke vending machines and would like to make them social. He wants his machines to tweet and send push notifications with special offers to consumers who are geographically close. If the closest vending machine doesn’t have stock to offer, it should recommend the next closest vending machine that can offer the consumer a deal."
-        a. What would happen if the link between the collection tier and analysis tier is interrupted for an extended period of time? How can it be mitigated?
-        b. Would you anticipate the need to store historical data? Why?
-        c. What type of message delivery semantics does this streaming system need?
-    2.Review the following text and answer the related questions:
-    "Online retail businesses often use recommendation systems to suggest products to users based on their browsing and purchase history. These systems analyze large datasets to provide personalized suggestions, improving user experience and increasing sales."
-        a. How do recommendation systems benefit online retail businesses?
-        b. What challenges might arise when analyzing large datasets for personalized suggestions?
-        c. Why is user browsing and purchase history important for recommendation systems?
-        d. What measures can be taken to ensure the accuracy of personalized suggestions?
-    3.Consider the following statement and provide answers to the questions below:
-    "Autonomous vehicles rely on a combination of sensors, cameras, and machine learning algorithms to navigate and make real-time decisions on the road. These vehicles need to process vast amounts of data quickly to ensure safety and efficiency."
-        a. List the components essential for the navigation of autonomous vehicles mentioned in the statement.
-        b. Why is real-time data processing critical for autonomous vehicles?
-        c. How do machine learning algorithms contribute to the decision-making process in autonomous vehicles?
-        d. Explain the importance of safety and efficiency in the context of autonomous vehicles.
-
-    These examples illustrate the generation of unique questions with subquestions for various academic topics.
-
+    Generated Question Variants:
+    1. Imagine a network of smart refrigerators that send promotional notifications to nearby shoppers. If a refrigerator is empty, it directs customers to the next nearest one. [4]
+    a. What are the consequences of a prolonged interruption between the data collection and analysis systems? How can it be addressed? [2]
+    b. Do you need to store historical data in this scenario? Why? [1]
+    c. What kind of message delivery semantics is essential for this system? [1]
+    2. Envision a system of intelligent parking meters that notify drivers of available spots and provide promotions. If a meter is occupied, it guides drivers to the nearest open spot. [4]
+    a. What issues arise if the connection between data collection and analysis is severed? How can it be resolved? [2]
+    b. Is it important to store historical data in this context? Why or why not? [1]
+    c. What message delivery semantics should this system use? [1]
+    3. Consider a network of smart grocery carts that inform customers of deals and promotions. If a cart is in use, it suggests the next available one. [4]
+    a. What problems occur if the link between data collection and analysis breaks? How can they be mitigated? [2]
+    b. Would it be necessary to store historical data in this situation? Why? [1]
+    c. What message delivery semantics are required for this system? [1]
     [/INST]
+
     """
 
 
