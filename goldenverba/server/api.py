@@ -740,68 +740,92 @@ async def generate_question_variants(base_question, context):
     user_context = " ".join(context)
 
     base_question_gen = f"""
-            <s> [INST] As an inventive educator dedicated to nurturing critical thinking skills, your task is to devise a series of a number of distinct iterations of a mathematical problem or a textual problem. Each iteration should be rooted in a fundamental problem-solving technique, but feature diverse numerical parameters and creatively reworded text to discourage students from sharing answers. Your objective is to generate a collection of unique questions that not only promote critical thinking but also thwart easy duplication of solutions. Ensure that each variant presents different numerical values, yielding disparate outcomes. Each question should have its noun labels changed. Additionally, each question should stand alone without requiring reference to any other question, although they may share the same solving concept. Your ultimate aim is to fashion an innovative array of challenges that captivate students and inspire analytical engagement.
-            Strictly ensure that the questions are relevant to the following context-
-            [CONTEXT START]
-            {context}
-            [CONTEXT END]
-            
-            Example 1:
-            Original Question: What are the implications of Kant's categorical imperative on modern ethical theory?
+    <s> [INST] As an inventive educator dedicated to nurturing critical thinking skills, your task is to devise a series of a number of distinct iterations of a mathematical problem or a textual problem. Each iteration should be rooted in a fundamental problem-solving technique, but feature diverse numerical parameters and creatively reworded text to discourage students from sharing answers. Your objective is to generate a collection of unique questions that not only promote critical thinking but also thwart easy duplication of solutions. Ensure that each variant presents different numerical values, yielding disparate outcomes. Each question should have its noun labels changed. Additionally, each question should stand alone without requiring reference to any other question, although they may share the same solving concept. Your ultimate aim is to fashion an innovative array of challenges that captivate students and inspire analytical engagement.
+    Strictly ensure that the questions are relevant to the following context-
+    [CONTEXT START]
+    {context}
+    [CONTEXT END]
 
-            Generated Question Variants:
+    Here are a few examples from which you can learn on how to generate these variants.
+    Example 1:
+    Original Question: What are the implications of Kant's categorical imperative on modern ethical theory?
+    generated_question_variants:
+    1. How does Kant's categorical imperative shape contemporary discussions in normative ethics?
+    2. In what ways does Kant's notion of the categorical imperative influence current ethical frameworks?
+    3. Can Kant's categorical imperative be reconciled with utilitarian principles in modern ethical debates?
+    4. How do modern deontologists interpret Kant's categorical imperative in the context of bioethics?
+    5. What are the contemporary criticisms of applying Kant's categorical imperative to global justice issues?
+    6. How does Kant's categorical imperative inform the ethical considerations in artificial intelligence development?
 
-            1. How does Kant's categorical imperative shape contemporary discussions in normative ethics?
-            2. In what ways does Kant's notion of the categorical imperative influence current ethical frameworks?
-            3. Can Kant's categorical imperative be reconciled with utilitarian principles in modern ethical debates?
-            4. How do modern deontologists interpret Kant's categorical imperative in the context of bioethics?
-            5. What are the contemporary criticisms of applying Kant's categorical imperative to global justice issues?
-            6. How does Kant's categorical imperative inform the ethical considerations in artificial intelligence development?
+    -These are advanced discussion prompts for graduate-level philosophy seminars.
 
-            -These are advanced discussion prompts for graduate-level philosophy seminars.
-            
-            Example 2:
-            Original Question: What is the molarity of a solution containing 5 moles of solute in 2 liters of solution?
+    Example 2:
+    Original Question: What is the molarity of a solution containing 5 moles of solute in 2 liters of solution?
+    generated_question_variants:
+    1. What is the molarity of a solution containing 3 moles of solute in 1.5 liters of solution?
+    2. Calculate the molarity of a solution with 8 moles of solute in 4 liters of solution.
+    3. If a solution contains 6 moles of solute in 3 liters of solution, what is its molarity?
+    4. Determine the molarity of a solution with 2 moles of solute in 0.5 liters of solution.
+    5. What is the molarity of a solution with 7 moles of solute in 2.5 liters of solution?
+    6. Calculate the molarity of a solution containing 4 moles of solute in 1 liter of solution.
 
-            generated_question_variants:
+    -These are specialized numerical questions for advanced chemistry courses.
 
-            1. What is the molarity of a solution containing 3 moles of solute in 1.5 liters of solution?
-            2. Calculate the molarity of a solution with 8 moles of solute in 4 liters of solution.
-            3. If a solution contains 6 moles of solute in 3 liters of solution, what is its molarity?
-            4. Determine the molarity of a solution with 2 moles of solute in 0.5 liters of solution.
-            5. What is the molarity of a solution with 7 moles of solute in 2.5 liters of solution?
-            6. Calculate the molarity of a solution containing 4 moles of solute in 1 liter of solution.
+    Example 3:
+    Original Question:
+    Calculate the sequence of prime numbers up to 50. Show the order of the prime numbers in the sequence - 2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47.
+    generated_question_variants:
+    1. Determine the sequence of Fibonacci numbers up to the 10th term. Show the order of the Fibonacci numbers in the sequence - 0, 1, 1, 2, 3, 5, 8, 13, 21, 34.
+    2. Identify the sequence of even numbers from 2 to 20. Show the order of the even numbers in the sequence - 2, 4, 6, 8, 10, 12, 14, 16, 18, 20.
+    3. Calculate the sequence of squares of the first 10 natural numbers. Show the order of the squares in the sequence - 1, 4, 9, 16, 25, 36, 49, 64, 81, 100.
+    4. Determine the sequence of powers of 2 up to \(2^(10)\). Show the order of the powers of 2 in the sequence - 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024.
+    5. Identify the sequence of triangular numbers up to the 10th term. Show the order of the triangular numbers in the sequence - 1, 3, 6, 10, 15, 21, 28, 36, 45, 55.
 
-            -These are specialized numerical questions for advanced chemistry courses.
+    -These are advanced pseudo-code problems for computer science students focusing on streaming algorithms.
 
-            Example 3:
-            Original Question:
-            Calculate the sequence of prime numbers up to 50. Show the order of the prime numbers in the sequence - 2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47.
+    Example 4:
+    Original Question: Utilizing an initial score of 5 and a multiplier of 0.2, determine which product is the most popular based on this sequence of ratings: A, B, A, C, B, A, C, B, A, B?
+    generated_question_variants:
+    1. Given an initial score of 3 and a multiplier of 0.1, identify which app is the most downloaded based on this sequence of reviews: X, Y, Z, X, X, Y, Z, X, Y, Z?
+    2. With an initial score of 4 and a multiplier of 0.15, determine which book is the most read based on this series of mentions: Book1, Book2, Book1, Book3, Book2, Book1, Book3, Book2, Book1, Book3?
+    3. Using an initial score of 2 and a multiplier of 0.05, find which movie is the highest rated based on the following set of ratings: MovieA, MovieB, MovieA, MovieC, MovieB, MovieA, MovieC, MovieB, MovieA, MovieB?
+    4. With an initial score of 6 and a multiplier of 0.25, calculate which song is the most popular based on this stream of plays: SongX, SongY, SongX, SongZ, SongY, SongX, SongZ, SongY, SongX, SongZ?
+    5. Given an initial score of 4.5 and a multiplier of 0.3, determine which TV show is the most watched based on the following sequence of episodes: Show1, Show2, Show1, Show3, Show2, Show1, Show3, Show2, Show1, Show3?
 
-            generated_question_variants:
-
-            1. Determine the sequence of Fibonacci numbers up to the 10th term. Show the order of the Fibonacci numbers in the sequence - 0, 1, 1, 2, 3, 5, 8, 13, 21, 34.
-            2. Identify the sequence of even numbers from 2 to 20. Show the order of the even numbers in the sequence - 2, 4, 6, 8, 10, 12, 14, 16, 18, 20.
-            3. Calculate the sequence of squares of the first 10 natural numbers. Show the order of the squares in the sequence - 1, 4, 9, 16, 25, 36, 49, 64, 81, 100.
-            4. Determine the sequence of powers of 2 up to \(2^(10)\). Show the order of the powers of 2 in the sequence - 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024.
-            5. Identify the sequence of triangular numbers up to the 10th term. Show the order of the triangular numbers in the sequence - 1, 3, 6, 10, 15, 21, 28, 36, 45, 55.
+    Explanation: Notice how the the numerical values are changing, it is extremely important for the numerical values to change. If there is a sequence, it will change too. It is essential that the numerical values are different for each variant. The generated questions are similar to the originals but rephrased using different wording or focusing on a different aspect of the problem (area vs. perimeter, speed vs. time).
 
 
-            -These are advanced pseudo-code problems for computer science students focusing on streaming algorithms.
-            
-            generated_question_variants:
-            Original Question: Utilizing an initial score of 5 and a multiplier of 0.2, determine which product is the most popular based on this sequence of ratings: A, B, A, C, B, A, C, B, A, B?
+    Example 5:
+    Please generate 5 variants of the original question.
+    Rishkesh’s business owns thousands of Coke vending machines and would like to make them social. He wants his machines to tweet and sent push notifications with special offers to consumers who are geographically close. If the closest vending machine doesn’t have stock to offer, it should recommend the next closest vending machine that can offer the consumer a deal. [4]
+        a) What would happen if link between collection tier and analysis tier is interrupted for an extended period of time? How it can be mitigated? [2]
+        b) Would you anticipate need to store historical data? Why? [1]
+        c) What type of message delivery semantics does this streaming system needs? [1]
 
-            Variants:
-            1. Given an initial score of 3 and a multiplier of 0.1, identify which app is the most downloaded based on this sequence of reviews: X, Y, Z, X, X, Y, Z, X, Y, Z?
-            2. With an initial score of 4 and a multiplier of 0.15, determine which book is the most read based on this series of mentions: Book1, Book2, Book1, Book3, Book2, Book1, Book3, Book2, Book1, Book3?
-            3. Using an initial score of 2 and a multiplier of 0.05, find which movie is the highest rated based on the following set of ratings: MovieA, MovieB, MovieA, MovieC, MovieB, MovieA, MovieC, MovieB, MovieA, MovieB?
-            4. With an initial score of 6 and a multiplier of 0.25, calculate which song is the most popular based on this stream of plays: SongX, SongY, SongX, SongZ, SongY, SongX, SongZ, SongY, SongX, SongZ?
-            5. Given an initial score of 4.5 and a multiplier of 0.3, determine which TV show is the most watched based on the following sequence of episodes: Show1, Show2, Show1, Show3, Show2, Show1, Show3, Show2, Show1, Show3?
+    generated_question_variants:
+    1.Examine the following passage and respond to the subsequent questions:
+    "Rishkesh’s business owns thousands of Coke vending machines and would like to make them social. He wants his machines to tweet and send push notifications with special offers to consumers who are geographically close. If the closest vending machine doesn’t have stock to offer, it should recommend the next closest vending machine that can offer the consumer a deal."
+        a. What would happen if the link between the collection tier and analysis tier is interrupted for an extended period of time? How can it be mitigated?
+        b. Would you anticipate the need to store historical data? Why?
+        c. What type of message delivery semantics does this streaming system need?
+    2.Review the following text and answer the related questions:
+    "Online retail businesses often use recommendation systems to suggest products to users based on their browsing and purchase history. These systems analyze large datasets to provide personalized suggestions, improving user experience and increasing sales."
+        a. How do recommendation systems benefit online retail businesses?
+        b. What challenges might arise when analyzing large datasets for personalized suggestions?
+        c. Why is user browsing and purchase history important for recommendation systems?
+        d. What measures can be taken to ensure the accuracy of personalized suggestions?
+    3.Consider the following statement and provide answers to the questions below:
+    "Autonomous vehicles rely on a combination of sensors, cameras, and machine learning algorithms to navigate and make real-time decisions on the road. These vehicles need to process vast amounts of data quickly to ensure safety and efficiency."
+        a. List the components essential for the navigation of autonomous vehicles mentioned in the statement.
+        b. Why is real-time data processing critical for autonomous vehicles?
+        c. How do machine learning algorithms contribute to the decision-making process in autonomous vehicles?
+        d. Explain the importance of safety and efficiency in the context of autonomous vehicles.
 
-            Explanation: Notice how the the numerical values are changing, it is extremely important for the numerical values to change. If there is a sequence, it will change too. It is essential that the numerical values are different for each variant. The generated questions are similar to the originals but rephrased using different wording or focusing on a different aspect of the problem (area vs. perimeter, speed vs. time).
-            [/INST]
-        """
+    These examples illustrate the generation of unique questions with subquestions for various academic topics.
+
+    [/INST]
+    """
+
 
     # Define the payload for Ollama
     payload = {
@@ -813,7 +837,10 @@ async def generate_question_variants(base_question, context):
             {
                 "role": "user",
                 "content": f"""
-                '{base_question}'. Alo NOTE that no two variants must be dependent on each other, each and every variant needs to be a seperate question which can be answered just by looking at the particular variant, and no external data. 
+                Query - {base_question}
+
+                Instructions:
+                Alo NOTE that no two variants must be dependent on each other, each and every variant needs to be a standalone question which can be answered just by looking at the particular variant, and no external data. 
                 Strictly follow the format for your responses:
                     generated_question_variants:
                     1.
@@ -829,18 +856,18 @@ async def generate_question_variants(base_question, context):
         "options": {
             "top_k": 1, 
             "top_p": 1, 
-            "temperature": 0, 
+            "temperature": 0.5, 
             "seed": 100, 
         }
     }
 
     # Asynchronous call to Ollama API
     response = await asyncio.to_thread(ollama_chat, model='llama3', messages=payload['messages'], stream=payload['stream'])
-    print(response)
+    print(response['message']['content'])
     content = response['message']['content']    
 
     variants_dict = extract_variants(base_question, content)
-    print(variants_dict)
+    # print(variants_dict)
     # Return the response content
     return response['message']['content'], variants_dict
 
