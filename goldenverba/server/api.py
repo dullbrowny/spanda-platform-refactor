@@ -740,14 +740,15 @@ async def generate_question_variants(base_question, context):
     user_context = " ".join(context)
 
     base_question_gen = f"""
-    <s> [INST] You are a creative problem designer specializing in creating diverse variants of educational problems. Your objective is to produce unique versions of a given problem by altering numerical parameters, contexts, and wording to prevent straightforward answer sharing. Each variant should be based on the same core concept but presented in a way that makes each problem distinct and challenging.
-
-    Focus on maintaining the educational intent while providing varied contexts and scenarios. Make sure each problem is self-contained and does not rely on the original problem statement. Use the following context to guide your creation:
-
+    <s>Use the following context to guide your creation:
     [CONTEXT START]
     {context}
     [CONTEXT END]
 
+    [INST] You are a creative problem designer specializing in creating diverse variants of educational problems. Your objective is to produce unique versions of a given problem by altering numerical parameters, contexts, and wording to prevent straightforward answer sharing. 
+    Each variant should be based on the same core concept but presented in a way that makes each problem distinct and challenging - numerical values change for each variant.
+    Focus on maintaining the educational intent while providing varied contexts and scenarios. Make sure each problem is self-contained and does not rely on the original problem statement. 
+    
     Here are a few examples to illustrate the process:
 
     Example 1:
@@ -774,11 +775,11 @@ async def generate_question_variants(base_question, context):
     Original Question: Sequence the first 10 prime numbers.
 
     Generated Question Variants:
-    1. List the first 10 Fibonacci numbers in order.
-    2. Identify the first 10 even numbers in sequence.
-    3. What are the first 10 square numbers?
-    4. Provide the first 10 terms of the geometric sequence starting with 1 and ratio 2.
-    5. Sequence the first 10 odd numbers.
+    1. List the first 6 Fibonacci numbers in order.
+    2. Identify the first 8 even numbers in sequence.
+    3. What are the first 11 square numbers?
+    4. Provide the first 12 terms of the geometric sequence starting with 1 and ratio 2.
+    5. Sequence the first 9 odd numbers.
 
     Example 4:
     Original Question: If a score of 5 is multiplied by 0.2, which product is most popular based on these ratings: A, B, A, C, B, A, C, B, A, B?
@@ -1453,3 +1454,123 @@ async def evaluate_Resume(request: QueryRequest):
     }
     
     return response
+
+
+async def answer_gen(question, context):
+    user_context = "".join(context)
+    answer_inst = """
+        [INST]
+        You are a highly knowledgeable and detailed assistant. Please follow these guidelines when generating answers:
+        
+        1. **Format**: Ensure the answer is nicely formatted and visually appealing. Use bullet points, numbered lists, headings, and subheadings where appropriate.
+        
+        2. **Clarity**: Provide clear and concise explanations. Avoid jargon unless it is necessary and explain it when used.
+        
+        3. **Math Questions**: 
+        - Include all steps in the solution process.
+        - Use clear and logical progression from one step to the next.
+        - Explain each step briefly to ensure understanding.
+        - Use LaTeX formatting for mathematical expressions to ensure they are easy to read and understand.
+
+        4. **Non-Math Questions**:
+        - Provide detailed explanations and context.
+        - Break down complex ideas into simpler parts.
+        - Use examples where appropriate to illustrate points.
+        - Ensure the answer is comprehensive and addresses all parts of the question.
+        
+        5. **Tone**: Maintain a professional and friendly tone. Aim to be helpful and approachable.
+        
+        Here are a couple of examples to illustrate the format:
+
+        **Math Question Example:**
+        **Question:** Solve the equation \(2x^2 + 3x - 2 = 0\).
+        
+        **Answer:**
+        To solve the quadratic equation \(2x^2 + 3x - 2 = 0\), we will use the quadratic formula:
+        
+        \[
+        x = \frac{-b \pm \sqrt{b^2 - 4ac}}{2a}
+        \]
+        
+        Here, \(a = 2\), \(b = 3\), and \(c = -2\).
+        
+        1. Calculate the discriminant:
+        \[
+        b^2 - 4ac = 3^2 - 4 \cdot 2 \cdot (-2) = 9 + 16 = 25
+        \]
+        
+        2. Find the square root of the discriminant:
+        \[
+        \sqrt{25} = 5
+        \]
+        
+        3. Apply the quadratic formula:
+        \[
+        x = \frac{-3 \pm 5}{4}
+        \]
+        
+        4. Solve for \(x\):
+        \[
+        x_1 = \frac{-3 + 5}{4} = \frac{2}{4} = 0.5
+        \]
+        \[
+        x_2 = \frac{-3 - 5}{4} = \frac{-8}{4} = -2
+        \]
+        
+        Therefore, the solutions are \(x = 0.5\) and \(x = -2\).
+        
+        **Non-Math Question Example:**
+        **Question:** Explain the causes and effects of the Industrial Revolution.
+        
+        **Answer:**
+        The Industrial Revolution, which began in the late 18th century, was a period of significant technological, socioeconomic, and cultural change. Here are the main causes and effects:
+        
+        **Causes:**
+        1. **Technological Innovations**: Inventions such as the steam engine, spinning jenny, and power loom revolutionized production processes.
+        2. **Agricultural Improvements**: Enhanced farming techniques increased food production, supporting a growing population.
+        3. **Economic Factors**: Capital accumulation, the rise of banking, and the expansion of trade networks facilitated industrial growth.
+        4. **Political Stability**: Stable governments in countries like Britain provided an environment conducive to industrial investment.
+        
+        **Effects:**
+        1. **Urbanization**: Massive migration to cities led to urban growth and the development of new urban centers.
+        2. **Economic Growth**: Industrialization spurred unprecedented economic expansion and wealth creation.
+        3. **Social Changes**: The rise of a factory-based economy altered social structures, leading to the emergence of a new working class and changing labor dynamics.
+        4. **Environmental Impact**: Industrial activities resulted in significant environmental changes, including pollution and deforestation.
+        
+        Overall, the Industrial Revolution had profound and lasting impacts on virtually every aspect of society.
+        [/INST]
+    """
+    user_prompt = f"""Based on the context : {user_context}, 
+
+                    Please answer the following question - {question}"""
+
+    payload = {
+        "messages": [
+            {
+                "role": "system",
+                "content": answer_inst
+            },
+            {
+                "role": "user",
+                "content": f"""Query: {user_prompt}"""
+            }
+        ],
+        "stream": False,
+        "options": {
+            "top_k": 1,
+            "top_p": 1,
+            "temperature": 0,
+            "seed": 100
+        }
+    }
+
+
+    @app.post("/api/answergen")
+    async def ollama_aqg(request: QueryRequest):
+        query = request.query
+        context = await make_request(query)
+        answer = await answer_gen(query, context)
+        response = {
+            "answer": answer,
+        }
+        return response

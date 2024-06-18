@@ -9,7 +9,7 @@ import json
 import httpx
 import re
 import ollama
-from spanda_utils import grading_assistant, instructor_eval, generate_question_variants, extract_variants, make_request, dimensions
+from spanda_utils import answer_gen, grading_assistant, instructor_eval, generate_question_variants, extract_variants, make_request, dimensions
 
 import os
 from pathlib import Path
@@ -158,6 +158,16 @@ async def ollama_afe(request: QueryRequest):
         "SCORES": all_scores
     }
     
+    return response
+
+@app.post("/api/answergen")
+async def ollama_aqg(request: QueryRequest):
+    query = request.query
+    context = await make_request(query)
+    answer = await answer_gen(query, context)
+    response = {
+        "answer": answer,
+    }
     return response
 
 if __name__ == "__main__":
