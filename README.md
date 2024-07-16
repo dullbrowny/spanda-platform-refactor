@@ -321,7 +321,7 @@ Docker is a set of platform-as-a-service products that use OS-level virtualizati
    Ensure you have Git installed on your system. Then, open a terminal or command prompt and run the following command to clone the Verba repository:
 
 ```
-git clone https://github.com/weaviate/Verba.git
+git clone https://github.com/spandaai/verba_1.01
 ```
 
 1. **Set neccessary environment variables**
