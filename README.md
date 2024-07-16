@@ -282,7 +282,7 @@ Visit localhost:8000
 1. **Clone the Verba repos**
 
 ```
-git clone https://github.com/weaviate/Verba.git
+git clone https://github.com/spandaai/verba_1.01
 ```
 
 2. **Initialize a new Python Environment**
