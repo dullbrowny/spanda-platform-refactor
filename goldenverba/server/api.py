@@ -591,7 +591,7 @@ async def grading_assistant(question_answer_pair, context):
         "options": {"top_k": 1, "top_p": 1, "temperature": 0, "seed": 100}
     }
 
-    response = await asyncio.to_thread(ollama_chat, model='dolphin-llama3', messages=payload['messages'], stream=payload['stream'])
+    response = await asyncio.to_thread(ollama_chat, model='llama3', messages=payload['messages'], stream=payload['stream'])
     
     # Define a dictionary to store extracted scores
     scores_dict = {}
@@ -605,7 +605,7 @@ async def grading_assistant(question_answer_pair, context):
     # Iterate over each criterion
     for criterion in criteria:
         # Use regular expression to search for the criterion followed by 'Score:'
-        criterion_pattern = re.compile(rf'{criterion}:\s*-?\s*Score\s*(\d+)', re.IGNORECASE)
+        criterion_pattern = re.compile(rf'\*\*{criterion}:\*\*\s*Score\s*(\d+)', re.IGNORECASE)
         match = criterion_pattern.search(response_content)
         if match:
             # Extract the score value
@@ -613,7 +613,6 @@ async def grading_assistant(question_answer_pair, context):
             scores_dict[criterion] = score_value
         else:
             scores_dict[criterion] = "N/A"
-
 
     return response['message']['content'], scores_dict
 
