@@ -4,6 +4,7 @@ import fitz  # PyMuPDF
 import pytesseract
 from PIL import Image
 import io
+import re
 
 # Replace with your Moodle instance URL and token
 MOODLE_URL = 'http://localhost/moodle/moodle-4.2.1'
@@ -101,7 +102,6 @@ def extract_text_from_image(file_content):
 def extract_text_from_submission(file):
     file_url = file['fileurl']
     file_url_with_token = f"{file_url}&token={TOKEN}" if '?' in file_url else f"{file_url}?token={TOKEN}"
-    # print(f"Downloading file from URL: {file_url_with_token}")
     file_content = download_file(file_url_with_token)
     file_name = file['filename'].lower()
 
@@ -119,48 +119,97 @@ def extract_text_from_submission(file):
     except Exception as e:
         return f"Error extracting text: {str(e)}"
 
+# Function to extract Q&A pairs using regex
+def extract_qa_pairs(text):
+    qa_pairs = re.findall(r'(Q\d+:\s.*?\nA\d+:\s.*?(?=\nQ\d+:|\Z))', text, re.DOTALL)
+    return [pair.strip() for pair in qa_pairs]
+
+# Function to send Q&A pair to grading endpoint and get response
+def grade_qa_pair(qa_pair):
+    url = "http://localhost:8000/api/ollamaAGA"  # Use your actual endpoint URL
+    payload = {"query": qa_pair}
+    headers = {"Content-Type": "application/json"}
+    
+    response = requests.post(url, json=payload, headers=headers)
+    
+    if response.status_code == 200:
+        result = response.json()
+        justification = result.get("justification")
+        scores = result.get("scores")
+        return justification, scores
+    else:
+        raise Exception(f"Failed to grade Q&A pair: {response.status_code}, Response: {response.text}")
+
+# Function to process submissions for a single user
+def process_user_submissions(user, submissions_by_user):
+    user_id = user['id']
+    user_fullname = user['fullname']
+    user_email = user['email']
+    user_submission = submissions_by_user.get(user_id)
+    
+    if not user_submission:
+        return {
+            "Full Name": user_fullname,
+            "User ID": user_id,
+            "Email": user_email,
+            "Submissions": []
+        }
+    
+    graded_qa_pairs = []
+    for plugin in user_submission['plugins']:
+        if plugin['type'] == 'file':
+            for filearea in plugin['fileareas']:
+                for file in filearea['files']:
+                    try:
+                        text = extract_text_from_submission(file)
+                        qa_pairs = extract_qa_pairs(text)
+                        
+                        for qa_pair in qa_pairs:
+                            try:
+                                justification, scores = grade_qa_pair(qa_pair)
+                                graded_qa_pairs.append({
+                                    "Q&A Pair": qa_pair,
+                                    "Justification": justification,
+                                    "Scores": scores
+                                })
+                            except Exception as e:
+                                print(f"Error grading Q&A pair: {str(e)}")
+                    except Exception as e:
+                        print(f"Error extracting text for user {user_fullname}: {str(e)}")
+    
+    return {
+        "Full Name": user_fullname,
+        "User ID": user_id,
+        "Email": user_email,
+        "Submissions": graded_qa_pairs
+    }
+
 # Main function to get users, assignments, and extract text from submissions
 def main(assignment_id=None, assignment_name=None):
     try:
         users = get_enrolled_users()
         assignments = get_assignments()
         
-        print("Enrolled Users and Assignments:")
         assignment = None
         if assignment_id:
             assignment = next((a for a in assignments if a['id'] == assignment_id), None)
         elif assignment_name:
             assignment = next((a for a in assignments if a['name'].lower() == assignment_name.lower()), None)
         
-        if assignment:
-            print(f"Assignment ID: {assignment['id']}, Name: {assignment['name']}")
-            print(f"Assignment Description: {assignment['intro']}\n")  # Added line to print assignment description
-            submissions = get_submissions(assignment['id'])
-            submissions_by_user = {s['userid']: s for s in submissions}
-            
-            for user in users:
-                print(f"User ID: {user['id']}, Full Name: {user['fullname']}")
-                user_submission = submissions_by_user.get(user['id'])
-                
-                if user_submission:
-                    print(f"  Submission Status: {user_submission['status']}")
-                    for plugin in user_submission['plugins']:
-                        if plugin['type'] == 'file':
-                            for filearea in plugin['fileareas']:
-                                for file in filearea['files']:
-                                    print(f"    File: {file['filename']}")
-                                    # print(f"    File URL: {file['fileurl']}")
-                                    # print(f"    Download URL: {file['fileurl']}&token={TOKEN}")
-                                    try:
-                                        text = extract_text_from_submission(file)
-                                        print(f"    Text Content:\n{text}\n")
-                                    except Exception as e:
-                                        print(f"    Error extracting text: {str(e)}")
-                else:
-                    print("  No submissions found.")
-            print("\n")
-        else:
-            print("  No assignments found.")
+        if not assignment:
+            print("No assignments found.")
+            return
+        
+        print(f"Assignment ID: {assignment['id']}, Name: {assignment['name']}")
+        submissions = get_submissions(assignment['id'])
+        submissions_by_user = {s['userid']: s for s in submissions}
+        
+        qa_dict = [
+            process_user_submissions(user, submissions_by_user)
+            for user in users
+        ]
+        
+        print(qa_dict)
     except Exception as e:
         print(str(e))
 
