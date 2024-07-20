@@ -5,6 +5,7 @@ import pytesseract
 from PIL import Image
 import io
 import re
+import csv
 
 # Replace with your Moodle instance URL and token
 MOODLE_URL = 'http://localhost/moodle/moodle-4.2.1'
@@ -135,8 +136,8 @@ def grade_qa_pair(qa_pair):
     if response.status_code == 200:
         result = response.json()
         justification = result.get("justification")
-        scores = result.get("scores")
-        return justification, scores
+        avg_score = result.get("average_score")
+        return justification, avg_score
     else:
         raise Exception(f"Failed to grade Q&A pair: {response.status_code}, Response: {response.text}")
 
@@ -152,10 +153,13 @@ def process_user_submissions(user, submissions_by_user):
             "Full Name": user_fullname,
             "User ID": user_id,
             "Email": user_email,
-            "Submissions": []
+            "Total Score": 0,
+            "Feedback": "No submission"
         }
     
-    graded_qa_pairs = []
+    total_score = 0
+    all_comments = []
+
     for plugin in user_submission['plugins']:
         if plugin['type'] == 'file':
             for filearea in plugin['fileareas']:
@@ -166,23 +170,39 @@ def process_user_submissions(user, submissions_by_user):
                         
                         for qa_pair in qa_pairs:
                             try:
-                                justification, scores = grade_qa_pair(qa_pair)
-                                graded_qa_pairs.append({
-                                    "Q&A Pair": qa_pair,
-                                    "Justification": justification,
-                                    "Scores": scores
-                                })
+                                justification, avg_score = grade_qa_pair(qa_pair)
+                                total_score += avg_score
+                                all_comments.append(justification)
                             except Exception as e:
                                 print(f"Error grading Q&A pair: {str(e)}")
                     except Exception as e:
                         print(f"Error extracting text for user {user_fullname}: {str(e)}")
-    
+
+    feedback = " | ".join(all_comments)
     return {
         "Full Name": user_fullname,
         "User ID": user_id,
         "Email": user_email,
-        "Submissions": graded_qa_pairs
+        "Total Score": total_score,
+        "Feedback": feedback
     }
+
+# Function to write data to a CSV file in Moodle-compatible format
+def write_to_csv(data, assignment_name, filename="submissions.csv"):
+    with open(filename, mode='w', newline='', encoding='utf-8') as file:
+        writer = csv.writer(file)
+        
+        # Write the header
+        writer.writerow(["Full name", "Email address", assignment_name, "Feedback comments"])
+        
+        # Write the data
+        for user_data in data:
+            writer.writerow([
+                user_data["Full Name"],
+                user_data["Email"],
+                user_data["Total Score"],
+                user_data["Feedback"]
+            ])
 
 # Main function to get users, assignments, and extract text from submissions
 def main(assignment_id=None, assignment_name=None):
@@ -209,7 +229,8 @@ def main(assignment_id=None, assignment_name=None):
             for user in users
         ]
         
-        print(qa_dict)
+        write_to_csv(qa_dict, assignment_name)  # Write the data to CSV
+        print("Data has been written to submissions.csv")
     except Exception as e:
         print(str(e))
 

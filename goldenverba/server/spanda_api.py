@@ -69,6 +69,7 @@ if production_key == "True":
 else:
     production = False
 
+# All 3 projects - AGA, AQG and AFE
 # This endpoint is responsible for importing data and performing several operations, including loading, filtering, chunking, and embedding documents. 
 @app.post("/api/spandaimport")
 async def import_data(payload: ImportPayload):
@@ -105,7 +106,7 @@ async def import_data(payload: ImportPayload):
             }
         )
     
-
+# Automated grading assistant 
 @app.post("/api/ollamaAGA")
 async def ollama_aga(request: QueryRequest):
     query = request.query
@@ -120,6 +121,7 @@ async def ollama_aga(request: QueryRequest):
     }
     return response
 
+# Variants of a question paper
 @app.post("/api/ollamaAQG")
 async def ollama_aqg(request: QueryRequest):
     query = request.query
@@ -160,6 +162,7 @@ async def ollama_afe(request: QueryRequest):
     
     return response
 
+# Variants of a question paper - answergen
 @app.post("/api/answergen")
 async def ollama_aqg(request: QueryRequest):
     query = request.query

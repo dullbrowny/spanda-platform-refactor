@@ -511,7 +511,6 @@ async def make_request(query_user):
 
 async def grading_assistant(question_answer_pair, context):
     user_context = " ".join(context)
-    # print(context)
     rubric_content = f"""<s> [INST] Please act as an impartial judge and evaluate the quality of the provided answer which attempts to answer the provided question based on a provided context.
             You'll be given context, question and answer to submit your reasoning and score for the correctness, comprehensiveness and readability of the answer. 
 
@@ -602,6 +601,9 @@ async def grading_assistant(question_answer_pair, context):
     # Define the criteria
     criteria = ["Correctness", "Readability", "Comprehensiveness"]
 
+    # List to store individual scores
+    scores = []
+
     # Iterate over each criterion
     for criterion in criteria:
         # Use regular expression to search for the criterion followed by 'Score:'
@@ -609,12 +611,14 @@ async def grading_assistant(question_answer_pair, context):
         match = criterion_pattern.search(response_content)
         if match:
             # Extract the score value
-            score_value = match.group(1).strip()
-            scores_dict[criterion] = score_value
-        else:
-            scores_dict[criterion] = "N/A"
+            score_value = int(match.group(1).strip())
+            scores.append(score_value)
 
-    return response['message']['content'], scores_dict
+    # Calculate the average score if we have scores
+    avg_score = sum(scores) / len(scores) if scores else 0
+
+    return response['message']['content'], avg_score
+
 
 async def instructor_eval(instructor_name, context, score_criterion, explanation):
     # Define the criterion to evaluate
@@ -952,11 +956,11 @@ async def ollama_aga(request: QueryRequest):
     context = await make_request(query)
     if context is None:
         raise HTTPException(status_code=500, detail="Failed to fetch context")
-    variants, scores = await grading_assistant(query, context)
-    print(scores)
+    variants, avg_score = await grading_assistant(query, context)
+    print(avg_score)
     response = {
         "justification": variants,
-        "scores": scores
+        "average_score": avg_score
     }
     return response
 
