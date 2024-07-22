@@ -10,13 +10,12 @@ import csv
 # Replace with your Moodle instance URL and token
 MOODLE_URL = 'http://localhost/moodle/moodle-4.2.1'
 TOKEN = '80a42dd70578d1274a40e6994eafbb63'
-COURSE_ID = '2'  # Correct course ID
 
 # Function to make a Moodle API call
 def moodle_api_call(params):
     endpoint = f'{MOODLE_URL}/webservice/rest/server.php'
     response = requests.get(endpoint, params=params)
-    print("Status Code:", response.status_code)
+    print(f"API Call to {params['wsfunction']} - Status Code: {response.status_code}")
 
     try:
         result = response.json()
@@ -28,23 +27,32 @@ def moodle_api_call(params):
 
     return result
 
+# Function to get all courses
+def get_all_courses():
+    params = {
+        'wstoken': TOKEN,
+        'wsfunction': 'core_course_get_courses',
+        'moodlewsrestformat': 'json'
+    }
+    return moodle_api_call(params)
+
 # Function to get enrolled users in a specific course
-def get_enrolled_users():
+def get_enrolled_users(course_id):
     params = {
         'wstoken': TOKEN,
         'wsfunction': 'core_enrol_get_enrolled_users',
         'moodlewsrestformat': 'json',
-        'courseid': COURSE_ID
+        'courseid': course_id
     }
     return moodle_api_call(params)
 
 # Function to get assignments for a specific course
-def get_assignments():
+def get_assignments(course_id):
     params = {
         'wstoken': TOKEN,
         'wsfunction': 'mod_assign_get_assignments',
         'moodlewsrestformat': 'json',
-        'courseids[0]': COURSE_ID
+        'courseids[0]': course_id
     }
     assignments = moodle_api_call(params)
     
@@ -204,38 +212,88 @@ def write_to_csv(data, assignment_name, filename="submissions.csv"):
                 user_data["Feedback"]
             ])
 
+# Function to update grade for a user
+def update_grade(user_id, assignment_id, grade, feedback):
+    params = {
+        'wstoken': TOKEN,
+        'wsfunction': 'mod_assign_save_grade',
+        'moodlewsrestformat': 'json',
+        'assignmentid': assignment_id,
+        'userid': user_id,
+        'grade': grade,
+        'attemptnumber': -1,  # Use -1 to grade the latest attempt
+        'addattempt': 0,      # Set to 1 to create a new attempt, 0 to update the current one
+        'workflowstate': 'graded',  # Set the state to 'graded'
+        'plugindata[assignfeedbackcomments_editor][text]': feedback,  # Add feedback comments
+        'plugindata[assignfeedbackcomments_editor][format]': 1  # Format for the feedback (1 = HTML)
+    }
+    result = moodle_api_call(params)
+    return result
+
 # Main function to get users, assignments, and extract text from submissions
-def main(assignment_id=None, assignment_name=None):
+def main(course_name, assignment_name):
     try:
-        users = get_enrolled_users()
-        assignments = get_assignments()
+        print("Fetching courses...")
+        # Get all courses
+        courses = get_all_courses()
+        print(f"Found {len(courses)} courses.")
         
-        assignment = None
-        if assignment_id:
-            assignment = next((a for a in assignments if a['id'] == assignment_id), None)
-        elif assignment_name:
-            assignment = next((a for a in assignments if a['name'].lower() == assignment_name.lower()), None)
+        # Find course ID based on course name
+        course = next((c for c in courses if c['fullname'] == course_name), None)
+        
+        if not course:
+            raise Exception("Course not found.")
+        
+        course_id = course['id']
+        print(f"Course ID: {course_id}, Name: {course['fullname']}")
+
+        print("Fetching enrolled users...")
+        # Get enrolled users in the course
+        users = get_enrolled_users(course_id)
+        print(f"Found {len(users)} users.")
+
+        print("Fetching assignments...")
+        # Get assignments for the course
+        assignments = get_assignments(course_id)
+        print(f"Found {len(assignments)} assignments.")
+        
+        # Find assignment based on assignment name
+        assignment = next((a for a in assignments if a['name'] == assignment_name), None)
         
         if not assignment:
-            print("No assignments found.")
-            return
+            raise Exception("Assignment not found.")
         
         print(f"Assignment ID: {assignment['id']}, Name: {assignment['name']}")
+        
+        print("Fetching submissions...")
+        # Get submissions for the assignment
         submissions = get_submissions(assignment['id'])
-        submissions_by_user = {s['userid']: s for s in submissions}
+        print(f"Found {len(submissions)} submissions.")
+
+        submissions_by_user = {submission['userid']: submission for submission in submissions}
         
-        qa_dict = [
-            process_user_submissions(user, submissions_by_user)
-            for user in users
-        ]
+        print("Processing submissions...")
+        qa_dict = []
+        for user in users:
+            user_data = process_user_submissions(user, submissions_by_user)
+            qa_dict.append(user_data)
         
-        write_to_csv(qa_dict, assignment_name)  # Write the data to CSV
-        print("Data has been written to submissions.csv")
+        print("Writing results to CSV...")
+        write_to_csv(qa_dict, assignment['name'])
+        print("CSV file has been created.")
+        
+        print("Updating grades in Moodle...")
+        for user_data in qa_dict:
+            update_grade(user_data["User ID"], assignment['id'], user_data["Total Score"], user_data["Feedback"])
+            print(f"Updated grade for user: {user_data['Full Name']}")
+
+        print("Grades have been updated in Moodle.")
+        
     except Exception as e:
-        print(str(e))
+        print(f"Error: {str(e)}")
 
 if __name__ == '__main__':
-    # Provide the assignment_id or assignment_name you want to target. One of the fields is enough to obtain the submissions.
-    assignment_id = None  # Replace with specific assignment ID if needed
-    assignment_name = 'EC1'  # Replace with specific assignment name if needed
-    main(assignment_id=assignment_id, assignment_name=assignment_name)
+    # Provide the course_name and assignment_name you want to target
+    course_name = 'Introduction to computer science'  # Replace with specific course name
+    assignment_name = 'EC1'  # Replace with specific assignment name
+    main(course_name=course_name, assignment_name=assignment_name)
