@@ -235,7 +235,7 @@ def update_grade(user_id, assignment_id, grade, feedback):
     return result
 
 # Main function to get users, assignments, and extract text from submissions
-def main(course_name, assignment_name):
+def moodle_integration_pipeline(course_name, assignment_name):
     try:
         print("Fetching courses...")
         # Get all courses
@@ -302,4 +302,4 @@ course_name = "Introduction to computer science"
 assignment_name = "EC1"
 
 # Run the main function
-main(course_name, assignment_name)
+moodle_integration_pipeline(course_name, assignment_name)
