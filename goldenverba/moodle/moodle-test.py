@@ -131,6 +131,9 @@ def extract_text_from_submission(file):
 # Function to extract Q&A pairs using regex
 def extract_qa_pairs(text):
     qa_pairs = re.findall(r'(Q\d+:\s.*?\nA\d+:\s.*?(?=\nQ\d+:|\Z))', text, re.DOTALL)
+    if not qa_pairs:
+        # If no Q&A pairs are found, return the entire text
+        return [text.strip()]
     return [pair.strip() for pair in qa_pairs]
 
 # Function to send Q&A pair to grading endpoint and get response
@@ -196,7 +199,8 @@ def process_user_submissions(user, submissions_by_user):
     }
 
 # Function to write data to a CSV file in Moodle-compatible format
-def write_to_csv(data, assignment_name, filename="submissions.csv"):
+def write_to_csv(data, course_name, assignment_name):
+    filename = f"{course_name.replace(' ', '_')}_{assignment_name.replace(' ', '_')}_autograded.csv"
     with open(filename, mode='w', newline='', encoding='utf-8') as file:
         writer = csv.writer(file)
         
@@ -245,55 +249,57 @@ def main(course_name, assignment_name):
             raise Exception("Course not found.")
         
         course_id = course['id']
-        print(f"Course ID: {course_id}, Name: {course['fullname']}")
-
+        print(f"Course ID for '{course_name}': {course_id}")
+        
+        # Get enrolled users
         print("Fetching enrolled users...")
-        # Get enrolled users in the course
         users = get_enrolled_users(course_id)
-        print(f"Found {len(users)} users.")
-
-        print("Fetching assignments...")
+        print(f"Found {len(users)} enrolled users.")
+        
         # Get assignments for the course
+        print("Fetching assignments...")
         assignments = get_assignments(course_id)
         print(f"Found {len(assignments)} assignments.")
         
-        # Find assignment based on assignment name
+        # Find assignment ID based on assignment name
         assignment = next((a for a in assignments if a['name'] == assignment_name), None)
         
         if not assignment:
             raise Exception("Assignment not found.")
         
-        print(f"Assignment ID: {assignment['id']}, Name: {assignment['name']}")
+        assignment_id = assignment['id']
+        print(f"Assignment ID for '{assignment_name}': {assignment_id}")
         
-        print("Fetching submissions...")
         # Get submissions for the assignment
-        submissions = get_submissions(assignment['id'])
+        print("Fetching submissions...")
+        submissions = get_submissions(assignment_id)
         print(f"Found {len(submissions)} submissions.")
-
-        submissions_by_user = {submission['userid']: submission for submission in submissions}
         
+        # Create a dictionary for user submissions
+        submissions_by_user = {s['userid']: s for s in submissions}
+        
+        # Process submissions and extract text
         print("Processing submissions...")
-        qa_dict = []
-        for user in users:
-            user_data = process_user_submissions(user, submissions_by_user)
-            qa_dict.append(user_data)
+        processed_data = [process_user_submissions(user, submissions_by_user) for user in users]
         
-        print("Writing results to CSV...")
-        write_to_csv(qa_dict, assignment['name'])
-        print("CSV file has been created.")
+        # Write data to CSV
+        print("Writing data to CSV...")
+        write_to_csv(processed_data, course_name, assignment_name)
         
+        # Update grades in Moodle
         print("Updating grades in Moodle...")
-        for user_data in qa_dict:
-            update_grade(user_data["User ID"], assignment['id'], user_data["Total Score"], user_data["Feedback"])
-            print(f"Updated grade for user: {user_data['Full Name']}")
-
-        print("Grades have been updated in Moodle.")
+        for user_data in processed_data:
+            user_id = next(user['id'] for user in users if user['fullname'] == user_data['Full Name'])
+            update_grade(user_id, assignment_id, user_data['Total Score'], user_data['Feedback'])
+        
+        print("Processing completed successfully.")
         
     except Exception as e:
-        print(f"Error: {str(e)}")
+        print(f"An error occurred: {str(e)}")
 
-if __name__ == '__main__':
-    # Provide the course_name and assignment_name you want to target
-    course_name = 'Introduction to computer science'  # Replace with specific course name
-    assignment_name = 'EC1'  # Replace with specific assignment name
-    main(course_name=course_name, assignment_name=assignment_name)
+# Replace with actual course name and assignment name
+course_name = "Introduction to computer science"
+assignment_name = "EC1"
+
+# Run the main function
+main(course_name, assignment_name)
