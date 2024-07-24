@@ -63,7 +63,8 @@ origins = [
     "http://localhost:8000",
     "http://localhost:1511",
     "http://localhost/moodle", 
-    "http://localhost",  
+    "http://localhost", 
+    "https://taxila-spanda.wilp-connect.net",
 ]
 
 # Add middleware for handling Cross Origin Resource Sharing (CORS)
@@ -513,12 +514,7 @@ async def grading_assistant(question_answer_pair, context):
     user_context = " ".join(context)
     rubric_content = f"""<s> [INST] Please act as an impartial judge and evaluate the quality of the provided answer which attempts to answer the provided question based on a provided context.
             You'll be given context, question and answer to submit your reasoning and score for the correctness, comprehensiveness and readability of the answer. 
-
-            Here is the context - 
-            [CONTEXT START]
-            {user_context}. 
-            [CONTEXT START]
-
+            
             Below is your grading rubric: 
             - Correctness: If the answer correctly answers the question, below are the details for different scores:
             - Score 0: the answer is completely incorrect, doesn't mention anything about the question or is completely contrary to the correct answer.
@@ -590,7 +586,7 @@ async def grading_assistant(question_answer_pair, context):
         "options": {"top_k": 1, "top_p": 1, "temperature": 0, "seed": 100}
     }
 
-    response = await asyncio.to_thread(ollama_chat, model='dolphin-llama3', messages=payload['messages'], stream=payload['stream'])
+    response = await asyncio.to_thread(ollama_chat, model='llama3.1', messages=payload['messages'], stream=payload['stream'])
     
     # Define a dictionary to store extracted scores
     scores_dict = {}
@@ -604,10 +600,9 @@ async def grading_assistant(question_answer_pair, context):
     # List to store individual scores
     scores = []
 
-    # Iterate over each criterion
     for criterion in criteria:
         # Use regular expression to search for the criterion followed by 'Score:'
-        criterion_pattern = re.compile(rf'{criterion}:\s*-?\s*Score\s*(\d+)', re.IGNORECASE)
+        criterion_pattern = re.compile(rf'{criterion}:\s*\**\s*Score\s*(\d+)', re.IGNORECASE)
         match = criterion_pattern.search(response_content)
         if match:
             # Extract the score value
@@ -616,7 +611,7 @@ async def grading_assistant(question_answer_pair, context):
 
     # Calculate the average score if we have scores
     avg_score = sum(scores) / len(scores) if scores else 0
-
+    print(response['message']['content'])
     return response['message']['content'], avg_score
 
 
@@ -700,7 +695,7 @@ async def instructor_eval(instructor_name, context, score_criterion, explanation
     }
 
     # Asynchronous call to the LLM API
-    response = await asyncio.to_thread(ollama.chat, model='llama3', messages=payload['messages'], stream=payload['stream'])
+    response = await asyncio.to_thread(ollama.chat, model='llama3.1', messages=payload['messages'], stream=payload['stream'])
 
     # Store the response
     responses[score_criterion] = response
@@ -792,7 +787,7 @@ async def answer_gen(question, context):
     }
 
     # Call ollama_chat function in a separate thread
-    response = await asyncio.to_thread(ollama.chat, model='llama3', messages=payload['messages'], stream=payload['stream'])
+    response = await asyncio.to_thread(ollama.chat, model='llama3.1', messages=payload['messages'], stream=payload['stream'])
     answer = response['message']['content']   
 
     return answer
@@ -928,7 +923,7 @@ async def generate_question_variants(base_question, context):
     }
 
     # Asynchronous call to Ollama API
-    response = await asyncio.to_thread(ollama_chat, model='llama3', messages=payload['messages'], stream=payload['stream'])
+    response = await asyncio.to_thread(ollama_chat, model='llama3.1', messages=payload['messages'], stream=payload['stream'])
     print(response['message']['content'])
     content = response['message']['content']    
 
@@ -1339,7 +1334,7 @@ async def resume_eval(resume_name, jd_name, context, score_criterion, explanatio
         }
     }
 
-    response = await asyncio.to_thread(ollama.chat, model='llama3', messages=payload['messages'], stream=payload['stream'])
+    response = await asyncio.to_thread(ollama.chat, model='llama3.1', messages=payload['messages'], stream=payload['stream'])
     responses[score_criterion] = response
     content = response['message']['content']
 
@@ -1439,7 +1434,7 @@ async def resume_eval(resume_name, jd_name, context, score_criterion, explanatio
         "stream": False  # Assuming that streaming is set to False, adjust based on your implementation
     }
 
-    eval_response = await asyncio.to_thread(ollama.chat, model='llama3', messages=payload['messages'])  # Assuming chat function is defined to handle the completion request
+    eval_response = await asyncio.to_thread(ollama.chat, model='llama3.1', messages=payload['messages'])  # Assuming chat function is defined to handle the completion request
 
     # Log the eval_response to see its structure
     print("eval_response:", eval_response)

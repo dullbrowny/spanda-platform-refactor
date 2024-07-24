@@ -58,8 +58,21 @@ def get_assignments(course_id):
     
     if not assignments.get('courses'):
         raise Exception("No courses found.")
-    
-    return assignments['courses'][0]['assignments']
+
+    # Check if 'assignments' field exists
+    courses = assignments.get('courses', [])
+    if not courses:
+        print("No courses returned from API.")
+        return []
+
+    course_data = courses[0]  # Assuming the first entry is the target course
+
+    # Check if 'assignments' key exists
+    if 'assignments' not in course_data:
+        print(f"No assignments found for course: {course_data.get('fullname')}")
+        return []
+
+    return course_data['assignments']
 
 # Function to get submissions for a specific assignment
 def get_submissions(assignment_id):
@@ -176,18 +189,24 @@ def process_user_submissions(user, submissions_by_user):
             for filearea in plugin['fileareas']:
                 for file in filearea['files']:
                     try:
+                        print(f"\nProcessing file: {file['filename']} for {user_fullname}...")
                         text = extract_text_from_submission(file)
                         qa_pairs = extract_qa_pairs(text)
                         
-                        for qa_pair in qa_pairs:
+                        for i, qa_pair in enumerate(qa_pairs):
                             try:
                                 justification, avg_score = grade_qa_pair(qa_pair)
                                 total_score += avg_score
-                                all_comments.append(justification)
+                                comment = f"Q{i+1}: {justification}"
+                                all_comments.append(comment)
+
+                                # Display grading progress for each Q&A pair
+                                print(f"  Graded Q{i+1}: Avg. Score = {avg_score:.2f} - {justification}")
+                                
                             except Exception as e:
-                                print(f"Error grading Q&A pair: {str(e)}")
+                                print(f"  Error grading Q&A pair {i+1} for {user_fullname}: {str(e)}")
                     except Exception as e:
-                        print(f"Error extracting text for user {user_fullname}: {str(e)}")
+                        print(f"  Error extracting text for {user_fullname}: {str(e)}")
 
     feedback = " | ".join(all_comments)
     return {
@@ -199,24 +218,21 @@ def process_user_submissions(user, submissions_by_user):
     }
 
 # Function to write data to a CSV file in Moodle-compatible format
-def write_to_csv(data, course_name, assignment_name):
-    filename = f"{course_name.replace(' ', '_')}_{assignment_name.replace(' ', '_')}_autograded.csv"
+def write_to_csv(data, course_id, assignment_name):
+    filename = f"Course_{course_id}_{assignment_name.replace(' ', '_')}_autograded.csv"
     with open(filename, mode='w', newline='', encoding='utf-8') as file:
         writer = csv.writer(file)
         
         # Write the header
-        writer.writerow(["Full name", "Email address", assignment_name, "Feedback comments"])
+        writer.writerow(["Full Name", "User ID", "Email", "Total Score", "Feedback"])
         
-        # Write the data
-        for user_data in data:
-            writer.writerow([
-                user_data["Full Name"],
-                user_data["Email"],
-                user_data["Total Score"],
-                user_data["Feedback"]
-            ])
+        # Write the data rows
+        for row in data:
+            writer.writerow([row["Full Name"], row["User ID"], row["Email"], row["Total Score"], row["Feedback"]])
 
-# Function to update grade for a user
+    print(f"Data successfully written to CSV file: {filename}")
+
+# Function to update a user's grade in Moodle
 def update_grade(user_id, assignment_id, grade, feedback):
     params = {
         'wstoken': TOKEN,
@@ -225,81 +241,76 @@ def update_grade(user_id, assignment_id, grade, feedback):
         'assignmentid': assignment_id,
         'userid': user_id,
         'grade': grade,
-        'attemptnumber': -1,  # Use -1 to grade the latest attempt
-        'addattempt': 0,      # Set to 1 to create a new attempt, 0 to update the current one
-        'workflowstate': 'graded',  # Set the state to 'graded'
-        'plugindata[assignfeedbackcomments_editor][text]': feedback,  # Add feedback comments
-        'plugindata[assignfeedbackcomments_editor][format]': 1  # Format for the feedback (1 = HTML)
+        'feedback': feedback
     }
-    result = moodle_api_call(params)
-    return result
+    response = moodle_api_call(params)
+    print(f"Grade updated for User ID: {user_id}, Status: {response}")
 
-# Main function to get users, assignments, and extract text from submissions
-def moodle_integration_pipeline(course_name, assignment_name):
+# Main function to integrate with Moodle
+def moodle_integration_pipeline(course_id, assignment_name):
     try:
-        print("Fetching courses...")
         # Get all courses
+        print("\n=== Fetching Courses ===")
         courses = get_all_courses()
         print(f"Found {len(courses)} courses.")
-        
-        # Find course ID based on course name
-        course = next((c for c in courses if c['fullname'] == course_name), None)
-        
+
+        # Find course based on course ID
+        course = next((c for c in courses if c['id'] == course_id), None)
+
         if not course:
             raise Exception("Course not found.")
-        
-        course_id = course['id']
-        print(f"Course ID for '{course_name}': {course_id}")
-        
+
+        print(f"Course ID: {course_id} - Course Name: {course['fullname']}")
+
         # Get enrolled users
-        print("Fetching enrolled users...")
+        print("\n=== Fetching Enrolled Users ===")
         users = get_enrolled_users(course_id)
         print(f"Found {len(users)} enrolled users.")
-        
+
         # Get assignments for the course
-        print("Fetching assignments...")
+        print("\n=== Fetching Assignments ===")
         assignments = get_assignments(course_id)
         print(f"Found {len(assignments)} assignments.")
-        
+
         # Find assignment ID based on assignment name
-        assignment = next((a for a in assignments if a['name'] == assignment_name), None)
-        
+        assignment = next((a for a in assignments if a['name'].strip().lower() == assignment_name.strip().lower()), None)
+
         if not assignment:
             raise Exception("Assignment not found.")
-        
+
         assignment_id = assignment['id']
-        print(f"Assignment ID for '{assignment_name}': {assignment_id}")
-        
+        print(f"Assignment '{assignment_name}' found with ID: {assignment_id}")
+
         # Get submissions for the assignment
-        print("Fetching submissions...")
+        print("\n=== Fetching Submissions ===")
         submissions = get_submissions(assignment_id)
         print(f"Found {len(submissions)} submissions.")
-        
+
         # Create a dictionary for user submissions
         submissions_by_user = {s['userid']: s for s in submissions}
-        
-        # Process submissions and extract text
-        print("Processing submissions...")
-        processed_data = [process_user_submissions(user, submissions_by_user) for user in users]
-        
-        # Write data to CSV
-        print("Writing data to CSV...")
-        write_to_csv(processed_data, course_name, assignment_name)
-        
-        # Update grades in Moodle
-        print("Updating grades in Moodle...")
-        for user_data in processed_data:
-            user_id = next(user['id'] for user in users if user['fullname'] == user_data['Full Name'])
-            update_grade(user_id, assignment_id, user_data['Total Score'], user_data['Feedback'])
-        
-        print("Processing completed successfully.")
-        
-    except Exception as e:
-        print(f"An error occurred: {str(e)}")
 
-# Replace with actual course name and assignment name
-course_name = "Introduction to computer science"
+        # Process submissions and extract text
+        print("\n=== Processing Submissions ===")
+        processed_data = [process_user_submissions(user, submissions_by_user) for user in users]
+
+        # Write data to CSV
+        print("\n=== Writing Data to CSV ===")
+        write_to_csv(processed_data, course_id, assignment_name)
+
+        # Update grades in Moodle (uncomment if needed)
+        # print("Updating grades in Moodle...")
+        # for user_data in processed_data:
+        #     user_id = next(user['id'] for user in users if user['fullname'] == user_data['Full Name'])
+        #     update_grade(user_id, assignment_id, user_data['Total Score'], user_data['Feedback'])
+
+        print("\n=== Processing Completed Successfully ===")
+
+    except Exception as e:
+        print(f"\nAn error occurred: {str(e)}")
+
+# Replace with actual course ID and assignment name
+course_id = 2  # Example course ID
 assignment_name = "EC1"
 
 # Run the main function
-moodle_integration_pipeline(course_name, assignment_name)
+moodle_integration_pipeline(course_id, assignment_name)
