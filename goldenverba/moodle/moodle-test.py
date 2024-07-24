@@ -1,3 +1,4 @@
+
 import requests
 from docx import Document
 import fitz  # PyMuPDF
@@ -7,7 +8,8 @@ import io
 import re
 import csv
 
-# Replace with your Moodle instance URL and token
+# MOODLE_URL = 'https://taxila-spanda.wilp-connect.net/'
+# TOKEN = '8175921296d9c56dec8de1bba4bec94e'
 MOODLE_URL = 'http://localhost/moodle/moodle-4.2.1'
 TOKEN = '80a42dd70578d1274a40e6994eafbb63'
 
@@ -27,15 +29,6 @@ def moodle_api_call(params):
 
     return result
 
-# Function to get all courses
-def get_all_courses():
-    params = {
-        'wstoken': TOKEN,
-        'wsfunction': 'core_course_get_courses',
-        'moodlewsrestformat': 'json'
-    }
-    return moodle_api_call(params)
-
 # Function to get enrolled users in a specific course
 def get_enrolled_users(course_id):
     params = {
@@ -45,6 +38,15 @@ def get_enrolled_users(course_id):
         'courseid': course_id
     }
     return moodle_api_call(params)
+
+def check_admin_capabilities():
+    params = {
+        'wstoken': TOKEN,
+        'wsfunction': 'core_webservice_get_site_info',
+        'moodlewsrestformat': 'json',
+    }
+    site_info = moodle_api_call(params)
+    print("Site Info:", site_info)
 
 # Function to get assignments for a specific course
 def get_assignments(course_id):
@@ -56,23 +58,24 @@ def get_assignments(course_id):
     }
     assignments = moodle_api_call(params)
     
+    # print("Assignments API Response:", assignments)  # Debug statement
+    
     if not assignments.get('courses'):
         raise Exception("No courses found.")
 
-    # Check if 'assignments' field exists
     courses = assignments.get('courses', [])
     if not courses:
         print("No courses returned from API.")
         return []
 
-    course_data = courses[0]  # Assuming the first entry is the target course
+    course_data = courses[0]
 
-    # Check if 'assignments' key exists
     if 'assignments' not in course_data:
         print(f"No assignments found for course: {course_data.get('fullname')}")
         return []
 
     return course_data['assignments']
+
 
 # Function to get submissions for a specific assignment
 def get_submissions(assignment_id):
@@ -145,7 +148,6 @@ def extract_text_from_submission(file):
 def extract_qa_pairs(text):
     qa_pairs = re.findall(r'(Q\d+:\s.*?\nA\d+:\s.*?(?=\nQ\d+:|\Z))', text, re.DOTALL)
     if not qa_pairs:
-        # If no Q&A pairs are found, return the entire text
         return [text.strip()]
     return [pair.strip() for pair in qa_pairs]
 
@@ -200,7 +202,6 @@ def process_user_submissions(user, submissions_by_user):
                                 comment = f"Q{i+1}: {justification}"
                                 all_comments.append(comment)
 
-                                # Display grading progress for each Q&A pair
                                 print(f"  Graded Q{i+1}: Avg. Score = {avg_score:.2f} - {justification}")
                                 
                             except Exception as e:
@@ -223,10 +224,8 @@ def write_to_csv(data, course_id, assignment_name):
     with open(filename, mode='w', newline='', encoding='utf-8') as file:
         writer = csv.writer(file)
         
-        # Write the header
         writer.writerow(["Full Name", "User ID", "Email", "Total Score", "Feedback"])
         
-        # Write the data rows
         for row in data:
             writer.writerow([row["Full Name"], row["User ID"], row["Email"], row["Total Score"], row["Feedback"]])
 
@@ -249,19 +248,10 @@ def update_grade(user_id, assignment_id, grade, feedback):
 # Main function to integrate with Moodle
 def moodle_integration_pipeline(course_id, assignment_name):
     try:
-        # Get all courses
-        print("\n=== Fetching Courses ===")
-        courses = get_all_courses()
-        print(f"Found {len(courses)} courses.")
-
-        # Find course based on course ID
-        course = next((c for c in courses if c['id'] == course_id), None)
-
-        if not course:
-            raise Exception("Course not found.")
-
-        print(f"Course ID: {course_id} - Course Name: {course['fullname']}")
-
+        print(f"\nCourse ID: {course_id}")
+        # Get enrolled users
+        # print("\n=== Checking Admin Capabilities ===")
+        # check_admin_capabilities()
         # Get enrolled users
         print("\n=== Fetching Enrolled Users ===")
         users = get_enrolled_users(course_id)
@@ -272,7 +262,6 @@ def moodle_integration_pipeline(course_id, assignment_name):
         assignments = get_assignments(course_id)
         print(f"Found {len(assignments)} assignments.")
 
-        # Find assignment ID based on assignment name
         assignment = next((a for a in assignments if a['name'].strip().lower() == assignment_name.strip().lower()), None)
 
         if not assignment:
@@ -286,7 +275,6 @@ def moodle_integration_pipeline(course_id, assignment_name):
         submissions = get_submissions(assignment_id)
         print(f"Found {len(submissions)} submissions.")
 
-        # Create a dictionary for user submissions
         submissions_by_user = {s['userid']: s for s in submissions}
 
         # Process submissions and extract text
@@ -308,9 +296,7 @@ def moodle_integration_pipeline(course_id, assignment_name):
     except Exception as e:
         print(f"\nAn error occurred: {str(e)}")
 
-# Replace with actual course ID and assignment name
-course_id = 2  # Example course ID
+course_id = 2
 assignment_name = "EC1"
 
-# Run the main function
 moodle_integration_pipeline(course_id, assignment_name)
