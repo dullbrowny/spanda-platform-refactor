@@ -1,4 +1,3 @@
-
 import requests
 from docx import Document
 import fitz  # PyMuPDF
@@ -7,17 +6,22 @@ from PIL import Image
 import io
 import re
 import csv
+from PyPDF2 import PdfFileReader
 
-# MOODLE_URL = 'https://taxila-spanda.wilp-connect.net/'
-# TOKEN = '8175921296d9c56dec8de1bba4bec94e'
-MOODLE_URL = 'http://localhost/moodle/moodle-4.2.1'
-TOKEN = '80a42dd70578d1274a40e6994eafbb63'
+MOODLE_URL = 'https://taxila-spanda.wilp-connect.net/'
+TOKEN = '738cbb551a279f2cd2799562ea2cbddf'
+# MOODLE_URL = 'http://localhost/moodle/moodle-4.2.1'
+# TOKEN = '80a42dd70578d1274a40e6994eafbb63'
 
 # Function to make a Moodle API call
-def moodle_api_call(params):
+# Function to make a Moodle API call with detailed logging
+def moodle_api_call(params, extra_params=None):
+    if extra_params:
+        params.update(extra_params)
     endpoint = f'{MOODLE_URL}/webservice/rest/server.php'
     response = requests.get(endpoint, params=params)
     print(f"API Call to {params['wsfunction']} - Status Code: {response.status_code}")
+    print(f"API Request URL: {response.url}")  # Log the full URL for debugging
 
     try:
         result = response.json()
@@ -39,6 +43,7 @@ def get_enrolled_users(course_id):
     }
     return moodle_api_call(params)
 
+# Function to check admin capabilities
 def check_admin_capabilities():
     params = {
         'wstoken': TOKEN,
@@ -56,14 +61,15 @@ def get_assignments(course_id):
         'moodlewsrestformat': 'json',
         'courseids[0]': course_id
     }
-    assignments = moodle_api_call(params)
     
-    # print("Assignments API Response:", assignments)  # Debug statement
+    extra_params = {'includenotenrolledcourses': 1}
+    assignments = moodle_api_call(params, extra_params)
     
     if not assignments.get('courses'):
-        raise Exception("No courses found.")
+        print("No courses found.")
+        return []
 
-    courses = assignments.get('courses', [])
+    courses = assignments['courses']
     if not courses:
         print("No courses returned from API.")
         return []
@@ -76,9 +82,8 @@ def get_assignments(course_id):
 
     return course_data['assignments']
 
-
 # Function to get submissions for a specific assignment
-def get_submissions(assignment_id):
+def get_assignment_submissions(assignment_id):
     params = {
         'wstoken': TOKEN,
         'wsfunction': 'mod_assign_get_submissions',
@@ -87,10 +92,24 @@ def get_submissions(assignment_id):
     }
     submissions = moodle_api_call(params)
     
+    # Debug statement for API response
+    # print("Submissions API Response:", submissions)
+
     if not submissions.get('assignments'):
         return []
 
-    return submissions['assignments'][0]['submissions']
+    assignments_data = submissions.get('assignments', [])
+    if not assignments_data:
+        print("No assignments data returned from API.")
+        return []
+
+    assignment_data = assignments_data[0]
+
+    if 'submissions' not in assignment_data:
+        print(f"No submissions found for assignment: {assignment_id}")
+        return []
+
+    return assignment_data['submissions']
 
 # Function to download a file from a given URL
 def download_file(url):
@@ -102,11 +121,15 @@ def download_file(url):
 
 # Function to extract text from a PDF file
 def extract_text_from_pdf(file_content):
-    doc = fitz.open(stream=file_content, filetype="pdf")
-    text = ""
-    for page in doc:
-        text += page.get_text()
-    return text
+    try:
+        doc = fitz.open(stream=file_content, filetype="pdf")
+        text = ""
+        for page in doc:
+            text += page.get_text()
+        return text
+    except Exception as e:
+        return f"Error extracting text from PDF: {str(e)}"
+
 
 # Function to extract text from a DOCX file
 def extract_text_from_docx(file_content):
@@ -127,8 +150,11 @@ def extract_text_from_image(file_content):
 def extract_text_from_submission(file):
     file_url = file['fileurl']
     file_url_with_token = f"{file_url}&token={TOKEN}" if '?' in file_url else f"{file_url}?token={TOKEN}"
+    print(f"Downloading file from URL: {file_url_with_token}")  # Log the file URL
+    
     file_content = download_file(file_url_with_token)
     file_name = file['filename'].lower()
+    print(f"Processing file: {file_name}")  # Log the file name
 
     try:
         if file_name.endswith('.pdf'):
@@ -143,6 +169,7 @@ def extract_text_from_submission(file):
             return "Unsupported file format."
     except Exception as e:
         return f"Error extracting text: {str(e)}"
+
 
 # Function to extract Q&A pairs using regex
 def extract_qa_pairs(text):
@@ -168,7 +195,7 @@ def grade_qa_pair(qa_pair):
         raise Exception(f"Failed to grade Q&A pair: {response.status_code}, Response: {response.text}")
 
 # Function to process submissions for a single user
-def process_user_submissions(user, submissions_by_user):
+def process_user_submissions(user, submissions_by_user, activity_type):
     user_id = user['id']
     user_fullname = user['fullname']
     user_email = user['email']
@@ -186,28 +213,29 @@ def process_user_submissions(user, submissions_by_user):
     total_score = 0
     all_comments = []
 
-    for plugin in user_submission['plugins']:
-        if plugin['type'] == 'file':
-            for filearea in plugin['fileareas']:
-                for file in filearea['files']:
-                    try:
-                        print(f"\nProcessing file: {file['filename']} for {user_fullname}...")
-                        text = extract_text_from_submission(file)
-                        qa_pairs = extract_qa_pairs(text)
-                        
-                        for i, qa_pair in enumerate(qa_pairs):
-                            try:
-                                justification, avg_score = grade_qa_pair(qa_pair)
-                                total_score += avg_score
-                                comment = f"Q{i+1}: {justification}"
-                                all_comments.append(comment)
+    if activity_type == 'assignment':
+        for plugin in user_submission['plugins']:
+            if plugin['type'] == 'file':
+                for filearea in plugin['fileareas']:
+                    for file in filearea['files']:
+                        try:
+                            print(f"\nProcessing file: {file['filename']} for {user_fullname}...")
+                            text = extract_text_from_submission(file)
+                            qa_pairs = extract_qa_pairs(text)
+                            
+                            for i, qa_pair in enumerate(qa_pairs):
+                                try:
+                                    justification, avg_score = grade_qa_pair(qa_pair)
+                                    total_score += avg_score
+                                    comment = f"Q{i+1}: {justification}"
+                                    all_comments.append(comment)
 
-                                print(f"  Graded Q{i+1}: Avg. Score = {avg_score:.2f} - {justification}")
-                                
-                            except Exception as e:
-                                print(f"  Error grading Q&A pair {i+1} for {user_fullname}: {str(e)}")
-                    except Exception as e:
-                        print(f"  Error extracting text for {user_fullname}: {str(e)}")
+                                    print(f"  Graded Q{i+1}: Avg. Score = {avg_score:.2f} - {justification}")
+                                    
+                                except Exception as e:
+                                    print(f"  Error grading Q&A pair {i+1} for {user_fullname}: {str(e)}")
+                        except Exception as e:
+                            print(f"  Error extracting text for {user_fullname}: {str(e)}")
 
     feedback = " | ".join(all_comments)
     return {
@@ -217,6 +245,16 @@ def process_user_submissions(user, submissions_by_user):
         "Total Score": total_score,
         "Feedback": feedback
     }
+
+# Function to get course details by ID
+def get_course_by_id(course_id):
+    params = {
+        'wstoken': TOKEN,
+        'wsfunction': 'core_course_get_courses',
+        'moodlewsrestformat': 'json',
+        'options[ids][0]': course_id
+    }
+    return moodle_api_call(params)
 
 # Function to write data to a CSV file in Moodle-compatible format
 def write_to_csv(data, course_id, assignment_name):
@@ -246,57 +284,75 @@ def update_grade(user_id, assignment_id, grade, feedback):
     print(f"Grade updated for User ID: {user_id}, Status: {response}")
 
 # Main function to integrate with Moodle
-def moodle_integration_pipeline(course_id, assignment_name):
+# Main function to integrate with Moodle
+def moodle_integration_pipeline(course_id, activity_name, activity_type):
     try:
-        print(f"\nCourse ID: {course_id}")
-        # Get enrolled users
-        # print("\n=== Checking Admin Capabilities ===")
-        # check_admin_capabilities()
-        # Get enrolled users
+        # Fetching course details
+        print(f"\n=== Fetching Course Details for Course ID: {course_id} ===")
+        course_details = get_course_by_id(course_id)
+        if not course_details:
+            raise Exception("Course not found.")
+        course_name = course_details[0]['fullname']
+        print(f"Course Name: {course_name}")
+
+        # Fetching enrolled users
         print("\n=== Fetching Enrolled Users ===")
         users = get_enrolled_users(course_id)
         print(f"Found {len(users)} enrolled users.")
 
-        # Get assignments for the course
-        print("\n=== Fetching Assignments ===")
-        assignments = get_assignments(course_id)
-        print(f"Found {len(assignments)} assignments.")
+        if activity_type == 'assignment':
+            # Fetching assignments
+            print("\n=== Fetching Assignments ===")
+            activities = get_assignments(course_id)
+        else:
+            raise Exception("Unsupported activity type.")
 
-        assignment = next((a for a in assignments if a['name'].strip().lower() == assignment_name.strip().lower()), None)
+        # Debug: Print activities fetched
+        # print(f"Activities fetched: {activities}")
 
-        if not assignment:
-            raise Exception("Assignment not found.")
+        print(f"Found {len(activities)} {activity_type}s.")
 
-        assignment_id = assignment['id']
-        print(f"Assignment '{assignment_name}' found with ID: {assignment_id}")
+        # Debug: Print each activity name
+        # for activity in activities:
+        #     print(f"Activity: {activity['name']}")
 
-        # Get submissions for the assignment
+        # Matching the activity by name
+        activity = next((a for a in activities if a['name'].strip().lower() == activity_name.strip().lower()), None)
+        if not activity:
+            raise Exception(f"{activity_type.capitalize()} not found.")
+
+        activity_id = activity['id']
+        print(f"{activity_type.capitalize()} '{activity_name}' found with ID: {activity_id}")
+
+        # Fetching submissions for the assignment
         print("\n=== Fetching Submissions ===")
-        submissions = get_submissions(assignment_id)
+        submissions = get_assignment_submissions(activity_id)
+
+        # Debug: Print submissions fetched
+        # print(f"Submissions fetched: {submissions}")
+
         print(f"Found {len(submissions)} submissions.")
 
         submissions_by_user = {s['userid']: s for s in submissions}
 
-        # Process submissions and extract text
+        # Processing submissions
         print("\n=== Processing Submissions ===")
-        processed_data = [process_user_submissions(user, submissions_by_user) for user in users]
+        processed_data = [process_user_submissions(user, submissions_by_user, activity_type) for user in users]
 
-        # Write data to CSV
+        # Writing data to CSV
         print("\n=== Writing Data to CSV ===")
-        write_to_csv(processed_data, course_id, assignment_name)
-
-        # Update grades in Moodle (uncomment if needed)
-        # print("Updating grades in Moodle...")
-        # for user_data in processed_data:
-        #     user_id = next(user['id'] for user in users if user['fullname'] == user_data['Full Name'])
-        #     update_grade(user_id, assignment_id, user_data['Total Score'], user_data['Feedback'])
+        write_to_csv(processed_data, course_id, activity_name)
 
         print("\n=== Processing Completed Successfully ===")
 
     except Exception as e:
         print(f"\nAn error occurred: {str(e)}")
 
-course_id = 2
-assignment_name = "EC1"
+# Main function call
+# course_id = 2
+# activity_name = "EC1"
+course_id = 245
+activity_name = "Assignment 1"
+activity_type = "assignment"  # Only assignment supported
 
-moodle_integration_pipeline(course_id, assignment_name)
+moodle_integration_pipeline(course_id, activity_name, activity_type)
