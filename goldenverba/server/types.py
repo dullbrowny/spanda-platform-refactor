@@ -63,3 +63,7 @@ class GetComponentPayload(BaseModel):
 class SetComponentPayload(BaseModel):
     component: str
     selected_component: str
+
+class MoodleRequest(BaseModel):
+    course_name: str
+    assignment_name: str

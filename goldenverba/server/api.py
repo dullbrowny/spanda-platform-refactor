@@ -4,19 +4,23 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from ollama import chat as ollama_chat
 from httpx import AsyncClient
-import asyncio
+import aiohttp
+
 import json
 import httpx
 import re , asyncio
+import zipfile
 import ollama
 from pydantic import BaseModel
 import base64
 import logging 
 from typing import List
-
+from fastapi import BackgroundTasks
 import os
 from pathlib import Path
-
+from goldenverba.moodle.test import get_all_courses
+from goldenverba.moodle.test import get_assignments
+from goldenverba.moodle.test import moodle_integration_pipeline
 from dotenv import load_dotenv
 from starlette.websockets import WebSocketDisconnect
 from wasabi import msg  # type: ignore[import]
@@ -36,11 +40,39 @@ from goldenverba.server.types import (
     GetDocumentPayload,
     SearchQueryPayload,
     ImportPayload,
-    QueryRequest
+    QueryRequest,
+    MoodleRequest
 )
+import requests
+from docx import Document
+import fitz  # PyMuPDF
+import pytesseract
+from PIL import Image
+import io
+import re
+import csv
+import httpx
+import asyncio
 from goldenverba.server.util import get_config, set_config, setup_managers
 logger = logging.getLogger("API")
 load_dotenv()
+# Replace with your Moodle instance URL and token
+
+MOODLE_URL = os.getenv('MOODLE_URL')
+TOKEN = os.getenv('TOKEN')
+# Function to make a Moodle API call
+def moodle_api_call(params):
+    endpoint = f'{MOODLE_URL}/webservice/rest/server.php'
+    response = requests.get(endpoint, params=params)
+    print(f"API Call to {params['wsfunction']} - Status Code: {response.status_code}")
+
+    try:
+        result = response.json()
+        print("results", result)
+    except ValueError as e:
+        raise ValueError(f"Error parsing JSON response: {response.text}") from e
+
+    return result
 
 # Check if runs in production
 production_key = os.environ.get("VERBA_PRODUCTION", "")
@@ -950,6 +982,282 @@ def extract_variants(base_question, content):
     # Return the dictionary with base question as key and variants as values
     return {base_question: variants}
 
+@app.get("/api/courses")
+async def get_courses():
+    try:
+        courses = get_all_courses()
+        return JSONResponse(content={"courses": courses})
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+@app.get("/api/assignments")
+async def get_the_assignments():
+    try:
+        courses = get_all_courses()
+        assignments = {}
+        
+        for course in courses:
+            course_id = course['id']
+            if course_id == 1:
+                continue
+            print("course_id", course_id)
+            assignments[course_id] = get_assignments(course_id)
+        
+        return JSONResponse(content={"assignments": assignments})
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+    
+def get_all_courses():
+    params = {
+        'wstoken': TOKEN,
+        'wsfunction': 'core_course_get_courses',
+        'moodlewsrestformat': 'json'
+    }
+    return moodle_api_call(params)
+
+# Function to get enrolled users in a specific course
+def get_enrolled_users(course_id):
+    params = {
+        'wstoken': TOKEN,
+        'wsfunction': 'core_enrol_get_enrolled_users',
+        'moodlewsrestformat': 'json',
+        'courseid': course_id
+    }
+    return moodle_api_call(params)
+
+# Function to get assignments for a specific course
+def get_assignments(course_id):
+    params = {
+        'wstoken': TOKEN,
+        'wsfunction': 'mod_assign_get_assignments',
+        'moodlewsrestformat': 'json',
+        'courseids[0]': course_id
+    }
+    assignments = moodle_api_call(params)
+    if not assignments.get('courses'):
+        raise Exception("No courses found.")
+    
+    return assignments['courses'][0]['assignments']
+
+# Function to get submissions for a specific assignment
+def get_submissions(assignment_id):
+    params = {
+        'wstoken': TOKEN,
+        'wsfunction': 'mod_assign_get_submissions',
+        'moodlewsrestformat': 'json',
+        'assignmentids[0]': assignment_id
+    }
+    submissions = moodle_api_call(params)
+    
+    if not submissions.get('assignments'):
+        return []
+
+    return submissions['assignments'][0]['submissions']
+
+# Function to download a file from a given URL
+def download_file(url):
+    response = requests.get(url)
+    if response.status_code == 200:
+        return response.content
+    else:
+        raise Exception(f"Failed to download file: {response.status_code}, URL: {url}")
+
+# Function to extract text from a PDF file
+def extract_text_from_pdf(file_content):
+    doc = fitz.open(stream=file_content, filetype="pdf")
+    text = ""
+    for page in doc:
+        text += page.get_text()
+    return text
+
+# Function to extract text from a DOCX file
+def extract_text_from_docx(file_content):
+    with io.BytesIO(file_content) as f:
+        doc = Document(f)
+        return "\n".join([para.text for para in doc.paragraphs])
+
+# Function to extract text from a TXT file
+def extract_text_from_txt(file_content):
+    return file_content.decode('utf-8')
+
+# Function to extract text from an image file
+def extract_text_from_image(file_content):
+    image = Image.open(io.BytesIO(file_content))
+    return pytesseract.image_to_string(image)
+
+# Function to extract text from a submission file based on file type
+def extract_text_from_submission(file):
+    file_url = file['fileurl']
+    file_url_with_token = f"{file_url}&token={TOKEN}" if '?' in file_url else f"{file_url}?token={TOKEN}"
+    file_content = download_file(file_url_with_token)
+    file_name = file['filename'].lower()
+
+    try:
+        if file_name.endswith('.pdf'):
+            return extract_text_from_pdf(file_content)
+        elif file_name.endswith('.docx'):
+            return extract_text_from_docx(file_content)
+        elif file_name.endswith('.txt'):
+            return extract_text_from_txt(file_content)
+        elif file_name.endswith(('.png', '.jpg', '.jpeg')):
+            return extract_text_from_image(file_content)
+        else:
+            return "Unsupported file format."
+    except Exception as e:
+        return f"Error extracting text: {str(e)}"
+
+# Function to extract Q&A pairs using regex
+def extract_qa_pairs(text):
+    qa_pairs = re.findall(r'(Q\d+:\s.*?\nA\d+:\s.*?(?=\nQ\d+:|\Z))', text, re.DOTALL)
+    if not qa_pairs:
+        # If no Q&A pairs are found, return the entire text
+        return [text.strip()]
+    return [pair.strip() for pair in qa_pairs]
+
+# Function to send Q&A pair to grading endpoint and get response
+async def process_user_submissions(user, submissions_by_user, session):
+    user_id = user['id']
+    user_fullname = user['fullname']
+    user_email = user['email']
+    user_submission = submissions_by_user.get(user_id)
+    
+    print(f"Processing submissions for user: {user_fullname}")
+
+    if not user_submission:
+        print(f"No submission found for user: {user_fullname}")
+        return {
+            "Full Name": user_fullname,
+            "User ID": user_id,
+            "Email": user_email,
+            "Total Score": 0,
+            "Feedback": "No submission"
+        }
+
+    total_score = 0
+    all_comments = []
+
+    tasks = []
+    for plugin in user_submission['plugins']:
+        if plugin['type'] == 'file':
+            for filearea in plugin['fileareas']:
+                for file in filearea['files']:
+                    try:
+                        print(f"Extracting text from file: {file['filename']} for user: {user_fullname}")
+                        text = extract_text_from_submission(file)
+                        qa_pairs = extract_qa_pairs(text)
+                        
+                        print("TEXT", text)
+                        print("qa_pairs", qa_pairs)
+                        
+                        for qa_pair in qa_pairs:
+                            # Directly call the /api/ollamaAGA API
+                            payload = {"query": qa_pair}
+                            headers = {"Content-Type": "application/json"}
+                            api_url = "http://localhost:8000/api/ollamaAGA"
+                            
+                            async with session.post(api_url, json=payload, headers=headers) as response:
+                                print("RESPONSE101", response)
+                                if response.status == 200:
+                                    result = await response.json()
+                                    justification = result.get("justification")
+                                    avg_score = result.get("average_score")
+                                    total_score += avg_score
+                                    all_comments.append(justification)
+                                else:
+                                    print(f"Failed to grade Q&A pair: {response.status}, Response: {await response.text()}")
+                                    
+                    except Exception as e:
+                        print(f"Error extracting text for user {user_fullname}: {str(e)}")
+
+    feedback = " | ".join(all_comments)
+    return {
+        "Full Name": user_fullname,
+        "User ID": user_id,
+        "Email": user_email,
+        "Total Score": total_score,
+        "Feedback": feedback
+    }
+
+# Function to write data to a CSV file in Moodle-compatible format
+def write_to_csv(data, course_name, assignment_name):
+    filename = f"{course_name.replace(' ', '_')}_{assignment_name.replace(' ', '_')}_autograded.csv"
+    with open(filename, mode='w', newline='', encoding='utf-8') as file:
+        writer = csv.writer(file, quoting=csv.QUOTE_ALL)
+        
+        # Write the header
+        writer.writerow(["Full name", "Email address", assignment_name, "Feedback comments"])
+        
+        # Write the data
+        for user_data in data:
+            feedback = user_data["Feedback"]  # Keep original feedback with newlines
+            
+            writer.writerow([
+                user_data["Full Name"],
+                user_data["Email"],
+                user_data["Total Score"],
+                feedback
+            ])
+    return filename
+
+
+# Function to update grade for a user
+def update_grade(user_id, assignment_id, grade, feedback):
+    params = {
+        'wstoken': TOKEN,
+        'wsfunction': 'mod_assign_save_grade',
+        'moodlewsrestformat': 'json',
+        'assignmentid': assignment_id,
+        'userid': user_id,
+        'grade': grade,
+        'attemptnumber': -1,
+        'addattempt': 0,
+        'workflowstate': 'graded',
+        'feedback': feedback
+    }
+    moodle_api_call(params)
+
+@app.post("/api/process")
+async def process_moodle_data(request: Request):
+    try:
+        data = await request.json()
+        course_name = data.get('course_name')
+        assignment_name = data.get('assignment_name')
+        if not course_name or not assignment_name:
+            raise HTTPException(status_code=400, detail="Missing course_name or assignment_name in the payload")
+
+        courses = await asyncio.to_thread(get_all_courses)
+        course = next((c for c in courses if c['fullname'] == course_name), None)
+        if not course:
+            raise HTTPException(status_code=404, detail="Course not found.")
+        
+        course_id = course['id']
+        users = await asyncio.to_thread(get_enrolled_users, course_id)
+        assignments = await asyncio.to_thread(get_assignments, course_id)
+        assignment = next((a for a in assignments if a['name'] == assignment_name), None)
+        if not assignment:
+            raise HTTPException(status_code=404, detail="Assignment not found.")
+        
+        assignment_id = assignment['id']
+        submissions = await asyncio.to_thread(get_submissions, assignment_id)
+        submissions_by_user = {s['userid']: s for s in submissions}
+
+        async with aiohttp.ClientSession() as session:
+            tasks = [process_user_submissions(user, submissions_by_user, session) for user in users]
+            processed_data = await asyncio.gather(*tasks)
+
+        for user_data in processed_data:
+            user_id = next(user['id'] for user in users if user['fullname'] == user_data['Full Name'])
+            await asyncio.to_thread(update_grade, user_id, assignment_id, user_data['Total Score'], user_data['Feedback'])
+
+        return JSONResponse(content={"data": processed_data, "course_name": course_name, "assignment_name": assignment_name})
+
+    except HTTPException as http_exc:
+        return JSONResponse(content={"error": http_exc.detail}, status_code=http_exc.status_code)
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+
+ 
 @app.post("/api/ollamaAGA")
 async def ollama_aga(request: QueryRequest):
     query = request.query
