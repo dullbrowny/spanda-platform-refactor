@@ -52,6 +52,10 @@ class ImportPayload(BaseModel):
 class QueryRequest(BaseModel):
     query: str
 
+class QueryRequestaqg(BaseModel):
+    query: str
+    NumberOfVariants: int
+
 class ConfigPayload(BaseModel):
     config: dict
 

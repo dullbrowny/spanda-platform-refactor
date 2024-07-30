@@ -38,7 +38,8 @@ from goldenverba.server.types import (
     SearchQueryPayload,
     ImportPayload,
     QueryRequest,
-    MoodleRequest
+    MoodleRequest,
+    QueryRequestaqg
 )
 import requests
 from docx import Document
@@ -840,85 +841,84 @@ async def answergen_ollama(request: QueryRequest):
     return response
 
 
-async def generate_question_variants(base_question, context):
+async def generate_question_variants(base_question, n, context):
     # Join the context into a single string
-    user_context = " ".join(context)
+    user_context = "".join(context)
 
     base_question_gen = f"""
-    <s>Use the following context to guide your creation:
+[INST]
+As an inventive educator dedicated to nurturing critical thinking skills, your task is to devise a series of distinct iterations of a mathematical or textual problem. Each iteration should be rooted in a fundamental problem-solving technique but feature diverse numerical parameters and creatively reworded text to discourage students from sharing answers. Your objective is to generate a collection of unique questions that not only promote critical thinking but also thwart easy duplication of solutions. Ensure that each variant presents different numerical values, yielding disparate outcomes. Each question should have its noun labels changed. Additionally, each question should stand alone without requiring reference to any other question, although they may share the same solving concept. Your ultimate aim is to fashion an innovative array of challenges that captivate students and inspire analytical engagement.
+
+Strictly ensure that the questions are relevant to the following context:
+
     [CONTEXT START]
-    {context}
+{context}
     [CONTEXT END]
 
-    [INST] You are a creative problem designer specializing in creating diverse variants of educational problems. Your objective is to produce unique versions of a given problem by altering numerical parameters, contexts, and wording to prevent straightforward answer sharing. 
-    Each variant should be based on the same core concept but presented in a way that makes each problem distinct and challenging - numerical values change for each variant.
-    Focus on maintaining the educational intent while providing varied contexts and scenarios. Make sure each problem is self-contained and does not rely on the original problem statement. 
-    
-    Here are a few examples to illustrate the process:
+Example 1:
+Original Question: What are the implications of Kant's categorical imperative on modern ethical theory?
 
-    Example 1:
-    Original Question: Analyze the impact of climate change on coastal cities.
+Generated Question Variants:
 
-    Generated Question Variants:
-    1. Discuss how rising sea levels due to climate change affect coastal urban infrastructure.
-    2. Evaluate the economic implications of climate change-induced flooding in coastal areas.
-    3. How does climate change influence the frequency and intensity of storms in coastal regions?
-    4. Assess the challenges faced by coastal communities in adapting to climate change.
-    5. What measures can coastal cities implement to mitigate the effects of climate change?
+1: How does Kant's categorical imperative shape contemporary discussions in normative ethics?
+2: In what ways does Kant's notion of the categorical imperative influence current ethical frameworks?
+3: Can Kant's categorical imperative be reconciled with utilitarian principles in modern ethical debates?
+4: How do modern deontologists interpret Kant's categorical imperative in the context of bioethics?
+5: What are the contemporary criticisms of applying Kant's categorical imperative to global justice issues?
+6: How does Kant's categorical imperative inform the ethical considerations in artificial intelligence development?
 
-    Example 2:
-    Original Question: Calculate the molarity of a solution with 5 moles of solute in 2 liters of solution.
+These are advanced discussion prompts for graduate-level philosophy seminars.
 
-    Generated Question Variants:
-    1. Determine the molarity of a solution containing 4 moles of solute in 1.5 liters of solution.
-    2. Find the molarity of a solution with 7 moles of solute in 3 liters of solution.
-    3. What is the molarity of a solution with 2.5 moles of solute in 1 liter of solution?
-    4. Calculate the molarity of a solution containing 6 moles of solute in 2.5 liters of solution.
-    5. If a solution has 8 moles of solute in 4 liters, what is its molarity?
+Example 2:
+Original Question: What is the molarity of a solution containing 5 moles of solute in 2 liters of solution?
 
-    Example 3:
-    Original Question: Sequence the first 10 prime numbers.
+Generated Question Variants:
 
-    Generated Question Variants:
-    1. List the first 6 Fibonacci numbers in order.
-    2. Identify the first 8 even numbers in sequence.
-    3. What are the first 11 square numbers?
-    4. Provide the first 12 terms of the geometric sequence starting with 1 and ratio 2.
-    5. Sequence the first 9 odd numbers.
+1: What is the molarity of a solution containing 3 moles of solute in 1.5 liters of solution?
+2: Calculate the molarity of a solution with 8 moles of solute in 4 liters of solution.
+3: If a solution contains 6 moles of solute in 3 liters of solution, what is its molarity?
+4: Determine the molarity of a solution with 2 moles of solute in 0.5 liters of solution.
+5: What is the molarity of a solution with 7 moles of solute in 2.5 liters of solution?
+6: Calculate the molarity of a solution containing 4 moles of solute in 1 liter of solution.
 
-    Example 4:
-    Original Question: If a score of 5 is multiplied by 0.2, which product is most popular based on these ratings: A, B, A, C, B, A, C, B, A, B?
+These are specialized numerical questions for advanced chemistry courses.
 
-    Generated Question Variants:
-    1. With an initial score of 3 and a multiplier of 0.1, which app has the highest rating based on these reviews: X, Y, Z, X, X, Y, Z, X, Y, Z?
-    2. Given a starting score of 4 and a multiplier of 0.15, identify the most popular book from this series of mentions: Book1, Book2, Book1, Book3, Book2, Book1, Book3, Book2, Book1, Book3?
-    3. Using an initial score of 2 and a multiplier of 0.05, determine the top-rated movie from these ratings: MovieA, MovieB, MovieA, MovieC, MovieB, MovieA, MovieC, MovieB, MovieA, MovieB?
-    4. With an initial score of 6 and a multiplier of 0.25, which song is most popular based on these plays: SongX, SongY, SongX, SongZ, SongY, SongX, SongZ, SongY, SongX, SongZ?
-    5. Given a score of 4.5 and a multiplier of 0.3, find the most watched TV show from these episodes: Show1, Show2, Show1, Show3, Show2, Show1, Show3, Show2, Show1, Show3?
+Example 3:
+Original Question: Calculate the sequence of prime numbers up to 50. Show the order of the prime numbers in the sequence - 2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47.
 
-    Example 5:
-    Original Question:
-    A company uses a network of vending machines to send offers to nearby customers. If a machine is out of stock, it refers customers to the next nearest machine. [4]
-    a) What happens if the connection between the data collection and analysis tiers is interrupted? How can this be mitigated? [2]
-    b) Is storing historical data necessary? Why? [1]
-    c) What message delivery semantics does this system require? [1]
+Generated Question Variants:
 
-    Generated Question Variants:
-    1. Imagine a network of smart refrigerators that send promotional notifications to nearby shoppers. If a refrigerator is empty, it directs customers to the next nearest one. [4]
-    a. What are the consequences of a prolonged interruption between the data collection and analysis systems? How can it be addressed? [2]
-    b. Do you need to store historical data in this scenario? Why? [1]
-    c. What kind of message delivery semantics is essential for this system? [1]
-    2. Envision a system of intelligent parking meters that notify drivers of available spots and provide promotions. If a meter is occupied, it guides drivers to the nearest open spot. [4]
-    a. What issues arise if the connection between data collection and analysis is severed? How can it be resolved? [2]
-    b. Is it important to store historical data in this context? Why or why not? [1]
-    c. What message delivery semantics should this system use? [1]
-    3. Consider a network of smart grocery carts that inform customers of deals and promotions. If a cart is in use, it suggests the next available one. [4]
-    a. What problems occur if the link between data collection and analysis breaks? How can they be mitigated? [2]
-    b. Would it be necessary to store historical data in this situation? Why? [1]
-    c. What message delivery semantics are required for this system? [1]
-    [/INST]
+1: Determine the sequence of Fibonacci numbers up to the 10th term. Show the order of the Fibonacci numbers in the sequence - 0, 1, 1, 2, 3, 5, 8, 13, 21, 34.
+2: Identify the sequence of even numbers from 2 to 20. Show the order of the even numbers in the sequence - 2, 4, 6, 8, 10, 12, 14, 16, 18, 20.
+3: Calculate the sequence of squares of the first 10 natural numbers. Show the order of the squares in the sequence - 1, 4, 9, 16, 25, 36, 49, 64, 81, 100.
+4: Determine the sequence of powers of 2 up to 2^10. Show the order of the powers of 2 in the sequence - 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024.
+5: Identify the sequence of triangular numbers up to the 10th term. Show the order of the triangular numbers in the sequence - 1, 3, 6, 10, 15, 21, 28, 36, 45, 55.
 
-    """
+These are advanced pseudo-code problems for computer science students focusing on streaming algorithms.
+
+Example 4:
+Original Question: Utilizing an initial score of 5 and a multiplier of 0.2, determine which product is the most popular based on this sequence of ratings: A, B, A, C, B, A, C, B, A, B?
+
+Generated Question Variants:
+
+1: Given an initial score of 3 and a multiplier of 0.1, identify which app is the most downloaded based on this sequence of reviews: X, Y, Z, X, X, Y, Z, X, Y, Z?
+2: With an initial score of 4 and a multiplier of 0.15, determine which book is the most read based on this series of mentions: Book1, Book2, Book1, Book3, Book2, Book1, Book3, Book2, Book1, Book3?
+3: Using an initial score of 2 and a multiplier of 0.05, find which movie is the highest rated based on the following set of ratings: MovieA, MovieB, MovieA, MovieC, MovieB, MovieA, MovieC, MovieB, MovieA, MovieB?
+4: With an initial score of 6 and a multiplier of 0.25, calculate which song is the most popular based on this stream of plays: SongX, SongY, SongX, SongZ, SongY, SongX, SongZ, SongY, SongX, SongZ?
+5: Given an initial score of 4.5 and a multiplier of 0.3, determine which TV show is the most watched based on the following sequence of episodes: Show1, Show2, Show1, Show3, Show2, Show1, Show3, Show2, Show1, Show3?
+
+Explanation: No two variants must be dependent on each other; each variant needs to be a standalone question that can be answered independently. Notice how the numerical values change; it is crucial for the numerical values to change. If there is a sequence, it must change as well. The generated questions are similar to the originals but rephrased using different wording or focusing on a different aspect of the problem (area vs. perimeter, speed vs. time). Also make sure if there are subquestions in the context there should be similar subquestions in the generated questions. If any are present in the same format as the question presented. Also if a question has multiple sub questions make sure you also have multiple sub questions in the generated questions.
+
+Strictly follow the format for your responses:
+generated_question_variants:
+1: Variant 1
+2: Variant 2
+3: Variant 3
+..
+..
+n: Variant n
+[/INST]
+"""
 
 
     # Define the payload for Ollama
@@ -926,24 +926,11 @@ async def generate_question_variants(base_question, context):
         "messages": [
             {
                 "role": "system",
-                "content": base_question_gen
+                "content": f"""{base_question_gen}"""
             },
             {
                 "role": "user",
-                "content": f"""
-                Query - {base_question}
-
-                Instructions:
-                Alo NOTE that no two variants must be dependent on each other, each and every variant needs to be a standalone question which can be answered just by looking at the particular variant, and no external data. 
-                Strictly follow the format for your responses:
-                    generated_question_variants:
-                    1.
-                    2.
-                    3.
-                    ..
-                    ..
-                    n.
-                    """,
+                "content": f"""Please generate {n} variants of the question: '{base_question}'""",
             }
         ],
         "stream": False,
@@ -954,16 +941,15 @@ async def generate_question_variants(base_question, context):
             "seed": 100, 
         }
     }
-
+    print("Original question" + base_question)
     # Asynchronous call to Ollama API
-    response = await asyncio.to_thread(ollama_chat, model='llama3.1', messages=payload['messages'], stream=payload['stream'])
-    print(response['message']['content'])
-    content = response['message']['content']    
-
+    response = await asyncio.to_thread(ollama.chat, model='dolphin-llama3', messages=payload['messages'], stream=payload['stream'])
+    content = response['message']['content']
+    print("Response-" + content)
     variants_dict = extract_variants(base_question, content)
-    # print(variants_dict)
     # Return the response content
     return response['message']['content'], variants_dict
+
 
 def extract_variants(base_question, content):
     # Regular expression to capture numbered or symbol-led variants
@@ -1329,10 +1315,11 @@ async def ollama_aga(query):
     return response
 
 @app.post("/api/ollamaAQG")
-async def ollama_aqg(request: QueryRequest):
+async def ollama_aqg(request: QueryRequestaqg):
     query = request.query
+    n = request.NumberOfVariants
     context = await make_request(query)
-    variants, variants_dict = await generate_question_variants(query, context)
+    variants, variants_dict = await generate_question_variants(query, n, context)
     response = {
         "variants": variants,
         "variants_dict": variants_dict
@@ -1520,6 +1507,7 @@ class ImportPayload(BaseModel):
 
 class QueryRequest(BaseModel):
     query: str
+
 
 @app.post("/api/upload_transcript")
 async def upload_transcript(payload: ImportPayload):
