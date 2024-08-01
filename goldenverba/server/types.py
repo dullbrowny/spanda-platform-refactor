@@ -71,3 +71,6 @@ class SetComponentPayload(BaseModel):
 class MoodleRequest(BaseModel):
     course_name: str
     assignment_name: str
+
+class CourseIDRequest(BaseModel):
+    course_id: str

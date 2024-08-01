@@ -1,4 +1,4 @@
-from fastapi import FastAPI, WebSocket, File, UploadFile, status, HTTPException, Request
+from fastapi import FastAPI, WebSocket, File, UploadFile, status, HTTPException, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -20,6 +20,7 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 from starlette.websockets import WebSocketDisconnect
+from goldenverba.server.types import CourseIDRequest 
 from wasabi import msg  # type: ignore[import]
 import time
 # from goldenverba.server.bitsp import(
@@ -56,8 +57,14 @@ logger = logging.getLogger("API")
 load_dotenv()
 # Replace with your Moodle instance URL and token
 
-MOODLE_URL = os.getenv('MOODLE_URL')
-TOKEN = os.getenv('TOKEN')
+# MOODLE_URL = os.getenv('MOODLE_URL')
+# TOKEN = os.getenv('TOKEN')
+
+# MOODLE_URL = 'https://taxila-spanda.wilp-connect.net/'
+# TOKEN = '738cbb551a279f2cd2799562ea2cbddf'
+
+MOODLE_URL = 'http://localhost/moodle/moodle'
+TOKEN = 'bd74ddc123be157c41c0e255a9ae7bfc'
 # Function to make a Moodle API call
 def moodle_api_call(params, extra_params=None):
     if extra_params:
@@ -964,30 +971,17 @@ def extract_variants(base_question, content):
     # Return the dictionary with base question as key and variants as values
     return {base_question: variants}
 
-@app.get("/api/courses")
-async def get_courses():
-    try:
-        courses = get_all_courses()
-        return JSONResponse(content={"courses": courses})
-    except Exception as e:
-        return JSONResponse(content={"error": str(e)}, status_code=500)
 
-@app.get("/api/assignments")
-async def get_the_assignments():
+@app.post("/api/assignments")
+async def get_the_assignments(request: CourseIDRequest):
     try:
-        courses = get_all_courses()
+        course_id = request.course_id
         assignments = {}
-        
-        for course in courses:
-            course_id = course['id']
-            if course_id == 1:
-                continue
-            print("course_id", course_id)
-            assignments[course_id] = get_assignments(course_id)
-        
+        assignments[course_id] = get_assignments(course_id)
         return JSONResponse(content={"assignments": assignments})
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
+
 
 def get_all_courses():
     params = {
