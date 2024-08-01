@@ -34,6 +34,29 @@ from goldenverba.server.util import get_config, set_config, setup_managers
 manager = verba_manager.VerbaManager()
 setup_managers(manager)
 
+
+async def chatbot(query, context):
+    user_context = "".join(context)
+    instructions = f"""You are an academic assistant chatbot. Your role is to answer questions based solely on the given context. If a question is outside the provided context, politely inform the user that you can only respond to questions within the given context. If someone asks about the chatbot, explain that you are an assistant designed to help users by answering academic and course-oriented questions."""
+    payload = {
+        "messages": [
+            {"role": "system", "content": instructions},
+            {"role": "user", "content": f"""
+             Context: {user_context}"
+             Query: {query}
+             """
+             }
+        ],
+        "stream": False,
+        "options": {"top_k": 1, "top_p": 1, "temperature": 0, "seed": 100}
+    }
+
+    response = await asyncio.to_thread(ollama_chat, model='llama3.1', messages=payload['messages'], stream=payload['stream'])
+    print(response['message']['content'])
+    return response['message']['content']
+
+
+
 # Retrieve context, prompt engineering and generation of AGA
 async def grading_assistant(question_answer_pair, context):
     user_context = " ".join(context)

@@ -42,6 +42,8 @@ from goldenverba.server.types import (
     MoodleRequest,
     QueryRequestaqg
 )
+
+from goldenverba.server.spanda_utils import chatbot
 import requests
 from docx import Document
 import fitz  # PyMuPDF
@@ -1293,16 +1295,34 @@ async def grade_assignment(request: Request):
 
  
 @app.post("/api/ollamaAGA")
-async def ollama_aga(query):
-    context = await make_request(query)
+async def ollama_aga(request: QueryRequest):
+    context = await make_request(request.query)
     if context is None:
         raise Exception("Failed to fetch context")
-    variants, avg_score = await grading_assistant(query, context)
+    
+    variants, avg_score = await grading_assistant(request.query, context)
+    
     response = {
         "justification": variants,
         "average_score": avg_score
     }
+    
     return response
+
+@app.post("/api/spandachat")
+async def spanda_chat(request: QueryRequest):
+    context = await make_request(request.query)
+    if context is None:
+        raise Exception("Failed to fetch context")
+    
+    answer = await chatbot(request.query, context)
+    
+    response = {
+        "answer": answer
+    }
+    
+    return response
+
 
 @app.post("/api/ollamaAQG")
 async def ollama_aqg(request: QueryRequestaqg):
@@ -1586,20 +1606,30 @@ async def ollama_afe(request: QueryRequest):
     all_responses = {}
     all_scores = {}
 
-    for dimension, explanation in dimensions.items():
-        query = f"Judge {instructor_name} based on {dimension}."
-        context = await make_request(query)  # Assuming make_request is defined elsewhere to get the context
-        # print(f"CONTEXT for {dimension}:")
-        # print(context)  # Print the context generated
-        result_responses, result_scores = await instructor_eval(instructor_name, context, dimension, explanation)
-        print(result_responses)
-        print(result_scores)
-        # Extract only the message['content'] part and store it
-        all_responses[dimension] = result_responses[dimension]['message']['content']
-        all_scores[dimension] = result_scores[dimension]
-    
+    for master_trait, explanation in dimensions.items():
+        for sub_trait, details in explanation["sub-dimensions"].items():
+            query = f"Judge {instructor_name} based on {sub_trait} under {master_trait}."
+            context = await make_request(query)  # Assuming make_request is defined elsewhere to get the context
+
+            combined_explanation = f"Definition: {details['definition']}\n"
+            combined_explanation += f"Example: {details['example']}\n"
+            combined_explanation += "Criteria:\n"
+            for score, criteria in details["criteria"].items():
+                combined_explanation += f"{score}: {criteria}\n"
+
+            result_responses, result_scores = await instructor_eval(instructor_name, context, sub_trait, combined_explanation)
+            
+            if master_trait not in all_responses:
+                all_responses[master_trait] = {}
+                all_scores[master_trait] = {}
+
+            # Store the response and score for each sub_trait under its master_trait
+            all_responses[master_trait][sub_trait] = result_responses[sub_trait]['message']['content']
+            all_scores[master_trait][sub_trait] = result_scores[sub_trait]
+
     print("SCORES:")
     print(json.dumps(all_scores, indent=2))
+
     response = {
         "DOCUMENT": all_responses,
         "SCORES": all_scores
