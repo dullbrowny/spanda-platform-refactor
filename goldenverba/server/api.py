@@ -57,14 +57,10 @@ logger = logging.getLogger("API")
 load_dotenv()
 # Replace with your Moodle instance URL and token
 
-# MOODLE_URL = os.getenv('MOODLE_URL')
-# TOKEN = os.getenv('TOKEN')
+MOODLE_URL = os.getenv('MOODLE_URL')
+TOKEN = os.getenv('TOKEN')
 
-# MOODLE_URL = 'https://taxila-spanda.wilp-connect.net/'
-# TOKEN = '738cbb551a279f2cd2799562ea2cbddf'
 
-MOODLE_URL = 'http://localhost/moodle/moodle'
-TOKEN = 'bd74ddc123be157c41c0e255a9ae7bfc'
 # Function to make a Moodle API call
 def moodle_api_call(params, extra_params=None):
     if extra_params:
