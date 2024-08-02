@@ -73,4 +73,4 @@ class MoodleRequest(BaseModel):
     assignment_name: str
 
 class CourseIDRequest(BaseModel):
-    course_id: str
+    course_shortname: str

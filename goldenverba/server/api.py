@@ -59,9 +59,8 @@ logger = logging.getLogger("API")
 load_dotenv()
 # Replace with your Moodle instance URL and token
 
-MOODLE_URL = os.getenv('MOODLE_URL')
-TOKEN = os.getenv('TOKEN')
-
+MOODLE_URL = 'http://localhost/moodle/moodle'
+TOKEN = 'bd74ddc123be157c41c0e255a9ae7bfc'
 
 # Function to make a Moodle API call
 def moodle_api_call(params, extra_params=None):
@@ -106,7 +105,6 @@ origins = [
     "https://taxila-spanda.wilp-connect.net",
 ]
 
-# Add middleware for handling Cross Origin Resource Sharing (CORS)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -973,12 +971,19 @@ def extract_variants(base_question, content):
 @app.post("/api/assignments")
 async def get_the_assignments(request: CourseIDRequest):
     try:
-        course_id = request.course_id
-        assignments = {}
-        assignments[course_id] = get_assignments(course_id)
-        return JSONResponse(content={"assignments": assignments})
+        course_id, course_name = get_course_info_by_shortname(request.course_shortname)
+        
+        assignments = get_assignments(course_id)
+        return JSONResponse(content={
+            "course_name": course_name,
+            "course_id": course_id,
+            "assignments": assignments
+        })
+    except HTTPException as e:
+        return JSONResponse(content={"error": e.detail}, status_code=e.status_code)
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
+
 
 
 def get_all_courses():
@@ -1009,6 +1014,22 @@ def check_admin_capabilities():
     site_info = moodle_api_call(params)
     print("Site Info:", site_info)
 
+
+def get_course_info_by_shortname(course_shortname):
+    params = {
+        'wstoken': TOKEN,
+        'wsfunction': 'core_course_get_courses_by_field',
+        'moodlewsrestformat': 'json',
+        'field': 'shortname',
+        'value': course_shortname
+    }
+    result = moodle_api_call(params)
+    if result['courses']:
+        course = result['courses'][0]
+        return course['id'], course['fullname']
+    else:
+        raise Exception("Course not found")
+    
 # Function to get assignments for a specific course
 def get_assignments(course_id):
     params = {
@@ -1222,8 +1243,12 @@ def update_grade(user_id, assignment_id, grade, feedback):
     print(f"Grade updated for User ID: {user_id}, Status: {response}")
 
 # Main function to integrate with Moodle
-async def moodle_integration_pipeline(course_id, assignment_name, activity_type):
+async def moodle_integration_pipeline(course_shortname, assignment_name, activity_type):
     try:
+
+        print(f"\n=== Fetching Course Details for Shortname: {course_shortname} ===")
+        course_id, course_name = get_course_info_by_shortname(course_shortname)
+        print(f"Course ID: {course_id}, Course Name: {course_name}")
         # Fetching course details
         print(f"\n=== Fetching Course Details for Course ID: {course_id} ===")
         course_details = get_course_by_id(course_id)
@@ -1281,12 +1306,12 @@ async def moodle_integration_pipeline(course_id, assignment_name, activity_type)
 @app.post("/api/process")
 async def grade_assignment(request: Request):
     data = await request.json()
-    course_id = data.get("course_id")
+    course_shortname = data.get("course_shortname")
     assignment_name = data.get("assignment_name")
     activity_type = "assignment"
 
     try:
-        processed_data = await moodle_integration_pipeline(course_id, assignment_name, activity_type)
+        processed_data = await moodle_integration_pipeline(course_shortname, assignment_name, activity_type)
         return JSONResponse(content={"status": "success", "message": "Grading completed successfully", "data": processed_data})
     except Exception as e:
         return JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
@@ -1324,6 +1349,21 @@ async def spanda_chat(request: QueryRequest):
     return response
 
 
+@app.post("/api/ollamaAGA")
+async def ollama_aga(query):
+    context = await make_request(query)
+    
+    if context is None:
+        raise Exception("Failed to fetch context")
+    
+    variants, avg_score= await grading_assistant(query, context)
+    response = {
+        "justification": variants,
+        "average_score": avg_score
+    }
+    return response
+
+
 @app.post("/api/ollamaAQG")
 async def ollama_aqg(request: QueryRequestaqg):
     query = request.query
@@ -1341,7 +1381,7 @@ async def ollama_aqg(request: QueryRequestaqg):
 async def ollama_afe(request: QueryRequest):
     dimensions = {
         # Example structure, fill in with actual dimensions and sub-dimensions
-        "Mastery of the Subject": {
+      "Mastery of the Subject": {
             "weight": 0.169,
             "sub-dimensions": {
                 "Knowledge of Content and Pedagogy": {
@@ -1356,18 +1396,18 @@ async def ollama_afe(request: QueryRequest):
                         5: "The transcript demonstrates exceptional content knowledge and masterfully employs a wide range of pedagogical practices"
                     }
                 },
-                "Breadth of Coverage": {
-                    "weight": 0.327,
-                    "definition": "Awareness of different possible perspectives related to the topic taught",
-                    "example": "Teacher discusses different theoretical views, current and prior scientific developments, etc.",
-                    "criteria": {
-                        1: "The transcript shows that the instructor covers minimal content with significant gaps in the curriculum",
-                        2: "The transcript shows that the instructor covers some content but with notable gaps in the curriculum",
-                        3: "The transcript shows that the instructor covers most of the required content with minor gaps",
-                        4: "The transcript shows that the instructor covers all required content thoroughly",
-                        5: "The transcript shows that the instructor covers all required content and provides additional enrichment material"
-                    }
-                },
+                # "Breadth of Coverage": {
+                #     "weight": 0.327,
+                #     "definition": "Awareness of different possible perspectives related to the topic taught",
+                #     "example": "Teacher discusses different theoretical views, current and prior scientific developments, etc.",
+                #     "criteria": {
+                #         1: "The transcript shows that the instructor covers minimal content with significant gaps in the curriculum",
+                #         2: "The transcript shows that the instructor covers some content but with notable gaps in the curriculum",
+                #         3: "The transcript shows that the instructor covers most of the required content with minor gaps",
+                #         4: "The transcript shows that the instructor covers all required content thoroughly",
+                #         5: "The transcript shows that the instructor covers all required content and provides additional enrichment material"
+                #     }
+                # },
                 "Knowledge of Resources": {
                     "weight": 0.310,
                     "definition": "Awareness of and utilization of a variety of current resources in the subject area to enhance instruction",
@@ -1397,18 +1437,18 @@ async def ollama_afe(request: QueryRequest):
                         5: "Consistently breaks down complex concepts using simple, precise language and a wide variety of highly relevant, engaging techniques such as analogies, examples, visuals, etc. to student understanding, seamlessly integrating them into the lesson flow."
                     }
                 },
-                "Demonstrating Flexibility and Responsiveness": {
-                    "weight": 0.248,
-                    "definition": "Ability to adapt to the changing needs of the students in the class while explaining the concepts.",
-                    "example": "The teacher tries to explain a concept using a particular example. On finding that the students are unable to understand, the teacher is able to produce alternate examples or explanation strategies to clarify the concept.",
-                    "criteria": {
-                        1: "Fails to adapt explanations based on student needs and does not provide alternate examples or strategies.",
-                        2: "Rarely adapts explanations, often sticking to the same methods even when students struggle to understand.",
-                        3: "Sometimes adapts explanations and provides alternate examples or strategies, but with limited effectiveness.",
-                        4: "Frequently adapts explanations and offers a variety of alternate examples or strategies that aid student understanding.",
-                        5: "Consistently and seamlessly adapts explanations, providing a wide range of highly effective alternate examples or strategies tailored to student needs."
-                    }
-                },
+                # "Demonstrating Flexibility and Responsiveness": {
+                #     "weight": 0.248,
+                #     "definition": "Ability to adapt to the changing needs of the students in the class while explaining the concepts.",
+                #     "example": "The teacher tries to explain a concept using a particular example. On finding that the students are unable to understand, the teacher is able to produce alternate examples or explanation strategies to clarify the concept.",
+                #     "criteria": {
+                #         1: "Fails to adapt explanations based on student needs and does not provide alternate examples or strategies.",
+                #         2: "Rarely adapts explanations, often sticking to the same methods even when students struggle to understand.",
+                #         3: "Sometimes adapts explanations and provides alternate examples or strategies, but with limited effectiveness.",
+                #         4: "Frequently adapts explanations and offers a variety of alternate examples or strategies that aid student understanding.",
+                #         5: "Consistently and seamlessly adapts explanations, providing a wide range of highly effective alternate examples or strategies tailored to student needs."
+                #     }
+                # },
                 "Differentiation Strategies": {
                     "weight": 0.246,
                     "definition": "The methods and approaches used by the teacher to accommodate diverse student needs, backgrounds, learning styles, and abilities.",
@@ -1474,18 +1514,18 @@ async def ollama_afe(request: QueryRequest):
                         5: "Expertly manages student behavior, fostering a highly respectful, engaged, and self-regulated learning community. Consistently encourages active participation from all students, ensures equal opportunities for engagement, and provides specific, timely, and constructive feedback and compliments that enhance learning and motivation."
                     }
                 },
-                "Adherence to Rules": {
-                    "weight": 0.242,
-                    "definition": "The extent to which the teacher follows established rules, procedures, and policies governing classroom conduct and professional behavior.",
-                    "example": "The teacher reminds the students to not circulate cracked versions of a software on the class discussion forum.",
-                    "criteria": {
-                        1: "Consistently disregards or violates school rules and policies",
-                        2: "Occasionally disregards or violates school rules and policies",
-                        3: "Generally adheres to school rules and policies with occasional lapses",
-                        4: "Consistently adheres to school rules and policies",
-                        5: "Strictly adheres to school rules and policies and actively promotes compliance among students"
-                    }
-                }
+                # "Adherence to Rules": {
+                #     "weight": 0.242,
+                #     "definition": "The extent to which the teacher follows established rules, procedures, and policies governing classroom conduct and professional behavior.",
+                #     "example": "The teacher reminds the students to not circulate cracked versions of a software on the class discussion forum.",
+                #     "criteria": {
+                #         1: "Consistently disregards or violates school rules and policies",
+                #         2: "Occasionally disregards or violates school rules and policies",
+                #         3: "Generally adheres to school rules and policies with occasional lapses",
+                #         4: "Consistently adheres to school rules and policies",
+                #         5: "Strictly adheres to school rules and policies and actively promotes compliance among students"
+                #     }
+                # }
             }
         },
         "Structuring of Objectives and Content": {
@@ -1599,6 +1639,7 @@ async def ollama_afe(request: QueryRequest):
                 }
             }
         }
+    
     }
 
     instructor_name = request.query
@@ -1627,23 +1668,13 @@ async def ollama_afe(request: QueryRequest):
             all_responses[master_trait][sub_trait] = result_responses[sub_trait]['message']['content']
             all_scores[master_trait][sub_trait] = result_scores[sub_trait]
 
-    print("SCORES:")
-    print(json.dumps(all_scores, indent=2))
-
     response = {
         "DOCUMENT": all_responses,
         "SCORES": all_scores
     }
     
+
     return response
-
-
-
-
-
-
-
-
 
 
 
