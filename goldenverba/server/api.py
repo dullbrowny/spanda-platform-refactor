@@ -59,8 +59,8 @@ logger = logging.getLogger("API")
 load_dotenv()
 # Replace with your Moodle instance URL and token
 
-MOODLE_URL = 'http://localhost/moodle/moodle'
-TOKEN = 'bd74ddc123be157c41c0e255a9ae7bfc'
+MOODLE_URL = os.getenv('MOODLE_URL')
+TOKEN = os.getenv('TOKEN')
 
 # Function to make a Moodle API call
 def moodle_api_call(params, extra_params=None):
