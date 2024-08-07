@@ -955,17 +955,23 @@ n: Variant n
 
 
 def extract_variants(base_question, content):
-    # Regular expression to capture numbered or symbol-led variants
-    pattern = r"^\s*(?:\d+[:.)\s-]+)(.*)$"
+    main_question_pattern = re.compile(r'^\d+\.\s.+', re.MULTILINE)
+    sub_question_pattern = re.compile(r'^[a-z]+\.\s.+|^[ivxlc]+\.\s.+', re.MULTILINE)
     
-    # Find all matches using the pattern
-    matches = re.findall(pattern, content, re.MULTILINE)
+    questions = []
+    main_questions = main_question_pattern.findall(content)
     
-    # Extract the variants from the matches
-    variants = [match.strip() for match in matches if match.strip()]
+    for main_question in main_questions:
+        sub_questions = sub_question_pattern.findall(content, content.index(main_question))
+        formatted_question = main_question.strip()
+        
+        if sub_questions:
+            formatted_sub_questions = "/n".join([f"{sq[0]}){sq[2:]}" for sq in sub_questions])
+            formatted_question = f"{main_question.strip()}/n{formatted_sub_questions}"
+        
+        questions.append({"main_question": formatted_question})
     
-    # Return the dictionary with base question as key and variants as values
-    return {base_question: variants}
+    return {base_question: questions}
 
 
 @app.post("/api/assignments")
@@ -1347,22 +1353,6 @@ async def spanda_chat(request: QueryRequest):
     }
     
     return response
-
-
-@app.post("/api/ollamaAGA")
-async def ollama_aga(query):
-    context = await make_request(query)
-    
-    if context is None:
-        raise Exception("Failed to fetch context")
-    
-    variants, avg_score= await grading_assistant(query, context)
-    response = {
-        "justification": variants,
-        "average_score": avg_score
-    }
-    return response
-
 
 @app.post("/api/ollamaAQG")
 async def ollama_aqg(request: QueryRequestaqg):
