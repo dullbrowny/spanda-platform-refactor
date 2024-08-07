@@ -346,8 +346,7 @@ async def query(payload: QueryPayload):
     msg.good(f"Received query: {payload.query}")
     msg.good(payload.query + "lol")
     start_time = time.time()  # Start timing
-            # chunks, context = manager.retrieve_chunks([payload.query], course_id={payload.course_id})  
-    print(payload.course_id + "inapi.py")
+    # print(payload.course_id + "inapi.py")
 
     try:
         chunks, context = manager.retrieve_chunks(payload.query, payload.course_id)
@@ -362,7 +361,7 @@ async def query(payload: QueryPayload):
             }
             for chunk in chunks
         ]
-        print(retrieved_chunks)
+        # print(retrieved_chunks)
         elapsed_time = round(time.time() - start_time, 2)  
         msg.good(f"Succesfully processed query: {payload.query} in {elapsed_time}s")    
 
