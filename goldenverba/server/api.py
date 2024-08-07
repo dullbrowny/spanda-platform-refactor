@@ -983,10 +983,10 @@ async def generate_question_variants(base_question, n, context):
         ],
         "stream": False,
         "options": {
-            "top_k": 1, 
-            "top_p": 1, 
-            "temperature": 0, 
-            "seed": 100, 
+            "top_k": 20, 
+            "top_p": 0.5, 
+            "temperature": 0.5, 
+            # "seed": 100, 
         }
     }
     print("Original question" + base_question)
@@ -1000,19 +1000,19 @@ async def generate_question_variants(base_question, n, context):
 
 
 def extract_variants(base_question, content):
-    main_question_pattern = re.compile(r'^\d+\.\s.+', re.MULTILINE)
-    sub_question_pattern = re.compile(r'^[a-z]+\.\s.+|^[ivxlc]+\.\s.+', re.MULTILINE)
+    main_question_pattern = re.compile(r'^\d+\.\s.*?(?=\n\d+\.)', re.DOTALL | re.MULTILINE)
+    sub_question_pattern = re.compile(r'^[a-z]+\.\s.*?(?=\n[a-z]+\.)|^[ivxlc]+\.\s.*?(?=\n[ivxlc]+\.|^\d+\.)', re.DOTALL | re.MULTILINE)
     
     questions = []
     main_questions = main_question_pattern.findall(content)
     
     for main_question in main_questions:
-        sub_questions = sub_question_pattern.findall(content, content.index(main_question))
+        sub_questions = sub_question_pattern.findall(main_question)
         formatted_question = main_question.strip()
         
         if sub_questions:
-            formatted_sub_questions = "/n".join([f"{sq[0]}){sq[2:]}" for sq in sub_questions])
-            formatted_question = f"{main_question.strip()}/n{formatted_sub_questions}"
+            formatted_sub_questions = "\n".join([f"{sq[0]}) {sq[2:]}" for sq in sub_questions])
+            formatted_question = f"{main_question.strip()}\n{formatted_sub_questions}"
         
         questions.append({"main_question": formatted_question})
     
