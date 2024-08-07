@@ -1,31 +1,33 @@
-from fastapi import FastAPI, WebSocket, File, UploadFile, status, HTTPException, Request
+from fastapi import FastAPI, WebSocket, File, UploadFile, status, HTTPException, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from ollama import chat as ollama_chat
 from httpx import AsyncClient
-import asyncio
+import aiohttp
+
 import json
 import httpx
 import re , asyncio
+import zipfile
 import ollama
 from pydantic import BaseModel
 import base64
 import logging 
 from typing import List
-
+from fastapi import BackgroundTasks
 import os
 from pathlib import Path
-
 from dotenv import load_dotenv
 from starlette.websockets import WebSocketDisconnect
+from goldenverba.server.types import CourseIDRequest 
 from wasabi import msg  # type: ignore[import]
 import time
-from goldenverba.server.bitsp import(
-    ollama_afe,
-    ollama_aga,
-    ollama_aqg
-)
+# from goldenverba.server.bitsp import(
+#     ollama_afe,
+#     ollama_aga,
+#     ollama_aqg
+# )
 import logging
 from goldenverba import verba_manager
 from goldenverba.server.types import (
@@ -36,12 +38,48 @@ from goldenverba.server.types import (
     GetDocumentPayload,
     SearchQueryPayload,
     ImportPayload,
-    QueryRequest
+    QueryRequest,
+    MoodleRequest,
+    QueryRequestaqg
 )
+
+from goldenverba.server.spanda_utils import chatbot
+import requests
+from docx import Document
+import fitz  # PyMuPDF
+import pytesseract
+from PIL import Image
+import io
+import re
+import csv
+import httpx
+import asyncio
 from goldenverba.server.util import get_config, set_config, setup_managers
 logger = logging.getLogger("API")
 load_dotenv()
+# Replace with your Moodle instance URL and token
 
+MOODLE_URL = os.getenv('MOODLE_URL')
+TOKEN = os.getenv('TOKEN')
+
+# Function to make a Moodle API call
+def moodle_api_call(params, extra_params=None):
+    if extra_params:
+        params.update(extra_params)
+    endpoint = f'{MOODLE_URL}/webservice/rest/server.php'
+    response = requests.get(endpoint, params=params)
+    print(f"API Call to {params['wsfunction']} - Status Code: {response.status_code}")
+    print(f"API Request URL: {response.url}")  # Log the full URL for debugging
+
+    try:
+        result = response.json()
+    except ValueError as e:
+        raise ValueError(f"Error parsing JSON response: {response.text}") from e
+
+    if 'exception' in result:
+        raise Exception(f"Error: {result['exception']['message']}")
+
+    return result
 # Check if runs in production
 production_key = os.environ.get("VERBA_PRODUCTION", "")
 tag = os.environ.get("VERBA_GOOGLE_TAG", "")
@@ -62,10 +100,11 @@ origins = [
     "https://verba-golden-ragtriever.onrender.com",
     "http://localhost:8000",
     "http://localhost:1511",
-    "http://localhost:1511/courses/s24/sample/gradingAssistant",
+    "http://localhost/moodle", 
+    "http://localhost", 
+    "https://taxila-spanda.wilp-connect.net",
 ]
 
-# Add middleware for handling Cross Origin Resource Sharing (CORS)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -307,7 +346,6 @@ async def query(payload: QueryPayload):
     msg.good(f"Received query: {payload.query}")
     start_time = time.time()  # Start timing
     try:
-        print("test1")
         chunks, context = manager.retrieve_chunks([payload.query])
 
         retrieved_chunks = [
@@ -321,7 +359,6 @@ async def query(payload: QueryPayload):
             }
             for chunk in chunks
         ]
-        print(retrieved_chunks)
         elapsed_time = round(time.time() - start_time, 2)  # Calculate elapsed time
         msg.good(f"Succesfully processed query: {payload.query} in {elapsed_time}s")
 
@@ -495,7 +532,7 @@ async def delete_document(payload: GetDocumentPayload):
     manager.delete_document_by_id(payload.document_id)
     return JSONResponse(content={})
 
-#for Ollama AGA
+#for bitspprojs
 async def make_request(query_user):
     # Escape the query to handle special characters and newlines
     formatted_query = json.dumps(query_user)
@@ -509,17 +546,12 @@ async def make_request(query_user):
     return context
 
 
+
 async def grading_assistant(question_answer_pair, context):
     user_context = " ".join(context)
-    # print(context)
     rubric_content = f"""<s> [INST] Please act as an impartial judge and evaluate the quality of the provided answer which attempts to answer the provided question based on a provided context.
             You'll be given context, question and answer to submit your reasoning and score for the correctness, comprehensiveness and readability of the answer. 
-
-            Here is the context - 
-            [CONTEXT START]
-            {user_context}. 
-            [CONTEXT START]
-
+            
             Below is your grading rubric: 
             - Correctness: If the answer correctly answers the question, below are the details for different scores:
             - Score 0: the answer is completely incorrect, doesn't mention anything about the question or is completely contrary to the correct answer.
@@ -591,7 +623,7 @@ async def grading_assistant(question_answer_pair, context):
         "options": {"top_k": 1, "top_p": 1, "temperature": 0, "seed": 100}
     }
 
-    response = await asyncio.to_thread(ollama_chat, model='dolphin-llama3', messages=payload['messages'], stream=payload['stream'])
+    response = await asyncio.to_thread(ollama_chat, model='llama3.1', messages=payload['messages'], stream=payload['stream'])
     
     # Define a dictionary to store extracted scores
     scores_dict = {}
@@ -599,32 +631,36 @@ async def grading_assistant(question_answer_pair, context):
     # Extract the response content
     response_content = response['message']['content']
 
-    # Define the criteria to look for
+    # Define the criteria
     criteria = ["Correctness", "Readability", "Comprehensiveness"]
 
-    # Iterate over each criterion
+    # List to store individual scores
+    scores = []
+
     for criterion in criteria:
         # Use regular expression to search for the criterion followed by 'Score:'
-        criterion_pattern = re.compile(rf'{criterion}:\s*-?\s*Score\s*(\d+)', re.IGNORECASE)
+        criterion_pattern = re.compile(rf'{criterion}:\s*\**\s*Score\s*(\d+)', re.IGNORECASE)
         match = criterion_pattern.search(response_content)
         if match:
             # Extract the score value
-            score_value = match.group(1).strip()
-            scores_dict[criterion] = score_value
-        else:
-            scores_dict[criterion] = "N/A"
+            score_value = int(match.group(1).strip())
+            scores.append(score_value)
 
+    # Calculate the average score if we have scores
+    avg_score = sum(scores) / len(scores) if scores else 0
+    print(response['message']['content'])
+    return response['message']['content'], avg_score
 
-    return response['message']['content'], scores_dict
 
 async def instructor_eval(instructor_name, context, score_criterion, explanation):
     # Define the criterion to evaluate
     user_context = "".join(context)
-    # print(context)
+    # print(user_context)
     # Initialize empty dictionaries to store relevant responses and scores
     responses = {}
     scores_dict = {}
-
+    # Initialize score_value with a default value
+    score_value = None
     # Evaluation prompt template
     evaluate_instructions = f"""
         [INST]
@@ -634,19 +670,22 @@ async def instructor_eval(instructor_name, context, score_criterion, explanation
         -Evaluation Details:
             -Focus exclusively on the provided video transcript.
             -Ignore interruptions from student entries/exits and notifications of participants 'joining' or 'leaving' the meeting.
-            -Assign scores from 0 to 3:
-                0: Poor performance
-                1: Average performance
-                2: Good performance
-                3: Exceptional performance
+            -Assign scores from 1 to 5:
         -Criteria:
             -Criterion Explanation: {explanation}
             -If the transcript lacks sufficient information to judge {score_criterion}, mark it as N/A and provide a clear explanation.
-            -Justify any score that is not a perfect 3.
+            -Justify any score that is not a perfect 5.
+            -Consider the context surrounding the example statements, as the context in which a statement is made is extremely important.
 
-        Strictly follow the output format-
+            Rate strictly on a scale of 1 to 5 using whole numbers only.
+
+            Ensure the examples are directly relevant to the evaluation criterion and discard any irrelevant excerpts.
+        [/INST]
+    """
+
+    output_format = f"""Strictly follow the output format-
         -Output Format:
-            -{score_criterion}: Score: score(range of 0 to 3, or N/A)
+            -{score_criterion}: Score(range of 1 to 5, or N/A) - note: Do not use bold or italics or any formatting in this line.
 
             -Detailed Explanation with Examples and justification for examples:
                 -Example 1: "[Quoted text from transcript]" [Description] [Timestamp]
@@ -655,15 +694,8 @@ async def instructor_eval(instructor_name, context, score_criterion, explanation
                 -...
                 -Example n: "[Quoted text from transcript]" [Description] [Timestamp]
             -Include both positive and negative instances.
-            -Highlight poor examples if the score is not ideal.
-
-            -Consider the context surrounding the example statements, as the context in which a statement is made is extremely important.
-
-            Rate strictly on a scale of 0 to 3 using whole numbers only.
-
-            Ensure the examples are directly relevant to the evaluation criterion and discard any irrelevant excerpts.
-        [/INST]
-    """
+            -Highlight poor examples if the score is not ideal."""
+    
     system_message = """This is a chat between a user and a judge. The judge gives helpful, detailed, and polite suggestions for improvement for a particular teacher from the given context - the context contains transcripts of videos. The assistant should also indicate when the judgement be found in the context."""
     
     formatted_transcripts = f"""Here are given transcripts for {instructor_name}-   
@@ -682,7 +714,7 @@ async def instructor_eval(instructor_name, context, score_criterion, explanation
             },
             {
                 "role": "user",
-                "content": formatted_transcripts + "/n/n" + evaluate_instructions + "/n/n" + user_prompt + " Strictly follow the format of output provided."
+                "content": formatted_transcripts + "/n/n" + evaluate_instructions + "/n/n" + user_prompt + "/n/n" + output_format
             }
         ],
         "stream": False,
@@ -700,7 +732,7 @@ async def instructor_eval(instructor_name, context, score_criterion, explanation
     }
 
     # Asynchronous call to the LLM API
-    response = await asyncio.to_thread(ollama.chat, model='llama3', messages=payload['messages'], stream=payload['stream'])
+    response = await asyncio.to_thread(ollama.chat, model='llama3.1', messages=payload['messages'], stream=payload['stream'])
 
     # Store the response
     responses[score_criterion] = response
@@ -709,83 +741,199 @@ async def instructor_eval(instructor_name, context, score_criterion, explanation
     content = response['message']['content']
 
     # Adjust the regular expression to handle various cases including 'Score:', direct number, asterisks, and new lines
-    pattern = rf'(score:\s*([\s\S]*?)(\d+)|\**{score_criterion}\**\s*:\s*(\d+))'
+    pattern = rf'(?i)(score:\s*(\d+)|\**{re.escape(score_criterion)}\**\s*[:\-]?\s*(\d+))'
+
     match = re.search(pattern, content, re.IGNORECASE)
 
     if match:
         # Check which group matched and extract the score
-        if match.group(3):  # This means 'Score:' pattern matched
-            score_value = match.group(3).strip()  # group(3) contains the number after 'Score:'
-        elif match.group(4):  # This means direct number pattern matched
-            score_value = match.group(4).strip()  # group(4) contains the number directly after score criterion
+        if match.group(2):  # This means 'Score:' pattern matched
+            score_value = match.group(2).strip()  # group(2) contains the number after 'Score:'
+        elif match.group(3):  # This means direct number pattern matched
+            score_value = match.group(3).strip()  # group(3) contains the number directly after score criterion
         else:
             score_value = "N/A"  # Fallback in case groups are not as expected
         scores_dict[score_criterion] = score_value
     else:
         scores_dict[score_criterion] = "N/A"
+        
+    # If the score is still "N/A", check explicitly for the `**` case
+    if score_value == "N/A":
+        pattern_strict = rf'\*\*{re.escape(score_criterion)}\*\*\s*[:\-]?\s*(\d+)'
+        match_strict = re.search(pattern_strict, content)
+        if match_strict:
+            score_value = match_strict.group(1).strip()
+        else:
+            score_value = "N/A"
 
     # Return the responses dictionary and scores dictionary
     return responses, scores_dict
 
+# Function to generate answer using the Ollama API
+async def answer_gen(question, context):
+    user_context = "".join(context)
+    # One shot example given in answer_inst should be the original question + original answer.
+    answer_inst = f"""
+        [INST]
+        You are a highly knowledgeable and detailed assistant. Please follow these guidelines when generating answers:
+        
+        1. **Format**: Ensure the answer is nicely formatted and visually appealing. Use bullet points, numbered lists, headings, and subheadings where appropriate.
+        
+        2. **Clarity**: Provide clear and concise explanations. Avoid jargon unless it is necessary and explain it when used.
+        
+        3. **Math Questions**: 
+        - Include all steps in the solution process.
+        - Use clear and logical progression from one step to the next.
+        - Explain each step briefly to ensure understanding.
+        - Use LaTeX formatting for mathematical expressions to ensure they are easy to read and understand.
 
-async def generate_question_variants(base_question, context):
+        4. **Non-Math Questions**:
+        - Provide detailed explanations and context.
+        - Break down complex ideas into simpler parts.
+        - Use examples where appropriate to illustrate points.
+        - Ensure the answer is comprehensive and addresses all parts of the question.
+        
+        5. **Tone**: Maintain a professional and friendly tone. Aim to be helpful and approachable.
+        
+        Here are a couple of examples to illustrate the format:
+        ONE-SHOT-EXAMPLE-GOES-HERE
+        [/INST]
+    """
+    user_prompt = f"""Based on the context : {user_context}, 
+    
+                    Please answer the following question - {question}"""
+
+    payload = {
+        "messages": [
+            {
+                "role": "system",
+                "content": answer_inst
+            },
+            {
+                "role": "user",
+                "content": f"""Query: {user_prompt}"""
+            }
+        ],
+        "stream": False,
+        "options": {
+            "top_k": 1,
+            "top_p": 1,
+            "temperature": 0,
+            "seed": 100
+        }
+    }
+
+    # Call ollama_chat function in a separate thread
+    response = await asyncio.to_thread(ollama.chat, model='llama3.1', messages=payload['messages'], stream=payload['stream'])
+    answer = response['message']['content']   
+
+    return answer
+
+# Define the endpoint
+@app.post("/api/answergen")
+async def answergen_ollama(request: QueryRequest):
+    query = request.query
+    context = await make_request(query)
+    if context is None:
+        raise HTTPException(status_code=500, detail="Failed to fetch context")
+    
+    answer = await answer_gen(query, context)
+    response = {
+        "answer": answer
+    }
+    return response
+
+
+async def generate_question_variants(base_question, n, context):
     # Join the context into a single string
-    user_context = " ".join(context)
+    user_context = "".join(context)
 
     base_question_gen = f"""
-            <s> [INST] As an inventive educator dedicated to nurturing critical thinking skills, your task is to devise a series of a number of distinct iterations of a mathematical problem or a textual problem. Each iteration should be rooted in a fundamental problem-solving technique, but feature diverse numerical parameters and creatively reworded text to discourage students from sharing answers. Your objective is to generate a collection of unique questions that not only promote critical thinking but also thwart easy duplication of solutions. Ensure that each variant presents different numerical values, yielding disparate outcomes. Each question should have its noun labels changed. Additionally, each question should stand alone without requiring reference to any other question, although they may share the same solving concept. Your ultimate aim is to fashion an innovative array of challenges that captivate students and inspire analytical engagement.
-            Strictly ensure that the questions are relevant to the following context-
-            {context}
+[INST]
+As an inventive educator dedicated to nurturing critical thinking skills, your task is to devise a series of distinct iterations of a mathematical or textual problem. Each iteration should be rooted in a fundamental problem-solving technique but feature diverse numerical parameters and creatively reworded text to discourage students from sharing answers. Your objective is to generate a collection of unique questions that not only promote critical thinking but also thwart easy duplication of solutions. Ensure that each variant presents different numerical values, yielding disparate outcomes. Each question should have its noun labels changed. Additionally, each question should stand alone without requiring reference to any other question, although they may share the same solving concept. Your ultimate aim is to fashion an innovative array of challenges that captivate students and inspire analytical engagement.
 
-            Strictly follow the format for your responses:
-            generated_question_variants:
-            1:Variant 1
-            2:Variant 2
-            3:Variant 3
-            ..
-            ..
-            n:Variant n
-            
-            -Few-shot examples-
-            *Example 1 (Textual):*
-            Please generate 3 variants of the question: What is the capital of France?
+Strictly ensure that the questions are relevant to the following context:
 
-            generated_question_variants-
-            1:In which European country is Paris located?
-            2:What is the capital of Italy?
-            3:What is the capital of Spain?
-            -This is a trivia quiz about geography.
+    [CONTEXT START]
+{context}
+    [CONTEXT END]
 
-            *Example 2 (Math):*
-            Please generate 10 variants of the question: "What is the area of a rectangle with length 10 units and width 5 units?"
-    
-            generated_question_variants-
-            1. Find the region enclosed by a shape with a length of 12 inches and a width of 6 inches.
-            2. What is the total surface area of a rectangle that measures 8 meters in length and 4 meters in width?
-            3. Determine the amount of space occupied by an object with dimensions 15 feet long and 7 feet wide.
-            4. Calculate the region covered by a shape with a length of 9 centimeters and a width of 5 centimeters.
-            5. What is the total area enclosed by a rectangle with a length of 11 meters and a width of 3 meters?
-            6. Find the surface area of an object that measures 16 inches long and 8 inches wide.
-            7. Discover the region occupied by a shape with dimensions 10 feet long and 4 feet wide.
-            8. Calculate the total area enclosed by a rectangle with a length of 13 centimeters and a width of 6 centimeters.
-            9. What is the surface area of an object that measures 12 meters long and 5 meters wide?
-            10. Determine the amount of space occupied by an object with dimensions 9 inches long and 3 inches wide.
-            -These are practice problems for basic geometry.
+Example 1:
+Original Question: What are the implications of Kant's categorical imperative on modern ethical theory?
 
-            Explanation: Notice how the the numerical values are changing. It is essential that the numerical values are different for each variant. The generated questions are similar to the originals but rephrased using different wording or focusing on a different aspect of the problem (area vs. perimeter, speed vs. time).
-            [/INST]
-        """
+Generated Question Variants:
+
+1: How does Kant's categorical imperative shape contemporary discussions in normative ethics?
+2: In what ways does Kant's notion of the categorical imperative influence current ethical frameworks?
+3: Can Kant's categorical imperative be reconciled with utilitarian principles in modern ethical debates?
+4: How do modern deontologists interpret Kant's categorical imperative in the context of bioethics?
+5: What are the contemporary criticisms of applying Kant's categorical imperative to global justice issues?
+6: How does Kant's categorical imperative inform the ethical considerations in artificial intelligence development?
+
+These are advanced discussion prompts for graduate-level philosophy seminars.
+
+Example 2:
+Original Question: What is the molarity of a solution containing 5 moles of solute in 2 liters of solution?
+
+Generated Question Variants:
+
+1: What is the molarity of a solution containing 3 moles of solute in 1.5 liters of solution?
+2: Calculate the molarity of a solution with 8 moles of solute in 4 liters of solution.
+3: If a solution contains 6 moles of solute in 3 liters of solution, what is its molarity?
+4: Determine the molarity of a solution with 2 moles of solute in 0.5 liters of solution.
+5: What is the molarity of a solution with 7 moles of solute in 2.5 liters of solution?
+6: Calculate the molarity of a solution containing 4 moles of solute in 1 liter of solution.
+
+These are specialized numerical questions for advanced chemistry courses.
+
+Example 3:
+Original Question: Calculate the sequence of prime numbers up to 50. Show the order of the prime numbers in the sequence - 2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47.
+
+Generated Question Variants:
+
+1: Determine the sequence of Fibonacci numbers up to the 10th term. Show the order of the Fibonacci numbers in the sequence - 0, 1, 1, 2, 3, 5, 8, 13, 21, 34.
+2: Identify the sequence of even numbers from 2 to 20. Show the order of the even numbers in the sequence - 2, 4, 6, 8, 10, 12, 14, 16, 18, 20.
+3: Calculate the sequence of squares of the first 10 natural numbers. Show the order of the squares in the sequence - 1, 4, 9, 16, 25, 36, 49, 64, 81, 100.
+4: Determine the sequence of powers of 2 up to 2^10. Show the order of the powers of 2 in the sequence - 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024.
+5: Identify the sequence of triangular numbers up to the 10th term. Show the order of the triangular numbers in the sequence - 1, 3, 6, 10, 15, 21, 28, 36, 45, 55.
+
+These are advanced pseudo-code problems for computer science students focusing on streaming algorithms.
+
+Example 4:
+Original Question: Utilizing an initial score of 5 and a multiplier of 0.2, determine which product is the most popular based on this sequence of ratings: A, B, A, C, B, A, C, B, A, B?
+
+Generated Question Variants:
+
+1: Given an initial score of 3 and a multiplier of 0.1, identify which app is the most downloaded based on this sequence of reviews: X, Y, Z, X, X, Y, Z, X, Y, Z?
+2: With an initial score of 4 and a multiplier of 0.15, determine which book is the most read based on this series of mentions: Book1, Book2, Book1, Book3, Book2, Book1, Book3, Book2, Book1, Book3?
+3: Using an initial score of 2 and a multiplier of 0.05, find which movie is the highest rated based on the following set of ratings: MovieA, MovieB, MovieA, MovieC, MovieB, MovieA, MovieC, MovieB, MovieA, MovieB?
+4: With an initial score of 6 and a multiplier of 0.25, calculate which song is the most popular based on this stream of plays: SongX, SongY, SongX, SongZ, SongY, SongX, SongZ, SongY, SongX, SongZ?
+5: Given an initial score of 4.5 and a multiplier of 0.3, determine which TV show is the most watched based on the following sequence of episodes: Show1, Show2, Show1, Show3, Show2, Show1, Show3, Show2, Show1, Show3?
+
+Explanation: No two variants must be dependent on each other; each variant needs to be a standalone question that can be answered independently. Notice how the numerical values change; it is crucial for the numerical values to change. If there is a sequence, it must change as well. The generated questions are similar to the originals but rephrased using different wording or focusing on a different aspect of the problem (area vs. perimeter, speed vs. time). Also make sure if there are subquestions in the context there should be similar subquestions in the generated questions. If any are present in the same format as the question presented. Also if a question has multiple sub questions make sure you also have multiple sub questions in the generated questions.
+
+Strictly follow the format for your responses:
+generated_question_variants:
+1: Variant 1
+2: Variant 2
+3: Variant 3
+..
+..
+n: Variant n
+[/INST]
+"""
+
 
     # Define the payload for Ollama
     payload = {
         "messages": [
             {
                 "role": "system",
-                "content": base_question_gen
+                "content": f"""{base_question_gen}"""
             },
             {
                 "role": "user",
-                "content": f"'{base_question}'",
+                "content": f"""Please generate {n} variants of the question: '{base_question}'""",
             }
         ],
         "stream": False,
@@ -796,161 +944,727 @@ async def generate_question_variants(base_question, context):
             "seed": 100, 
         }
     }
-
+    print("Original question" + base_question)
     # Asynchronous call to Ollama API
-    response = await asyncio.to_thread(ollama_chat, model='dolphin-llama3', messages=payload['messages'], stream=payload['stream'])
-   
-    content = response['message']['content']    
-
+    response = await asyncio.to_thread(ollama.chat, model='dolphin-llama3', messages=payload['messages'], stream=payload['stream'])
+    content = response['message']['content']
+    print("Response-" + content)
     variants_dict = extract_variants(base_question, content)
-    print(variants_dict)
     # Return the response content
     return response['message']['content'], variants_dict
 
-def extract_variants(base_question, content):
-    pattern = r"\d+:\s*(.*)"
-    matches = re.findall(pattern, content)
-    variants = {base_question: matches}
-    return variants
 
+def extract_variants(base_question, content):
+    main_question_pattern = re.compile(r'^\d+\.\s.+', re.MULTILINE)
+    sub_question_pattern = re.compile(r'^[a-z]+\.\s.+|^[ivxlc]+\.\s.+', re.MULTILINE)
+    
+    questions = []
+    main_questions = main_question_pattern.findall(content)
+    
+    for main_question in main_questions:
+        sub_questions = sub_question_pattern.findall(content, content.index(main_question))
+        formatted_question = main_question.strip()
+        
+        if sub_questions:
+            formatted_sub_questions = "/n".join([f"{sq[0]}){sq[2:]}" for sq in sub_questions])
+            formatted_question = f"{main_question.strip()}/n{formatted_sub_questions}"
+        
+        questions.append({"main_question": formatted_question})
+    
+    return {base_question: questions}
+
+
+@app.post("/api/assignments")
+async def get_the_assignments(request: CourseIDRequest):
+    try:
+        course_id, course_name = get_course_info_by_shortname(request.course_shortname)
+        
+        assignments = get_assignments(course_id)
+        return JSONResponse(content={
+            "course_name": course_name,
+            "course_id": course_id,
+            "assignments": assignments
+        })
+    except HTTPException as e:
+        return JSONResponse(content={"error": e.detail}, status_code=e.status_code)
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+
+
+def get_all_courses():
+    params = {
+        'wstoken': TOKEN,
+        'wsfunction': 'core_course_get_courses',
+        'moodlewsrestformat': 'json'
+    }
+    return moodle_api_call(params) 
+
+# Function to get enrolled users in a specific course
+def get_enrolled_users(course_id):
+    params = {
+        'wstoken': TOKEN,
+        'wsfunction': 'core_enrol_get_enrolled_users',
+        'moodlewsrestformat': 'json',
+        'courseid': course_id
+    }
+    return moodle_api_call(params)
+
+# Function to check admin capabilities
+def check_admin_capabilities():
+    params = {
+        'wstoken': TOKEN,
+        'wsfunction': 'core_webservice_get_site_info',
+        'moodlewsrestformat': 'json',
+    }
+    site_info = moodle_api_call(params)
+    print("Site Info:", site_info)
+
+
+def get_course_info_by_shortname(course_shortname):
+    params = {
+        'wstoken': TOKEN,
+        'wsfunction': 'core_course_get_courses_by_field',
+        'moodlewsrestformat': 'json',
+        'field': 'shortname',
+        'value': course_shortname
+    }
+    result = moodle_api_call(params)
+    if result['courses']:
+        course = result['courses'][0]
+        return course['id'], course['fullname']
+    else:
+        raise Exception("Course not found")
+    
+# Function to get assignments for a specific course
+def get_assignments(course_id):
+    params = {
+        'wstoken': TOKEN,
+        'wsfunction': 'mod_assign_get_assignments',
+        'moodlewsrestformat': 'json',
+        'courseids[0]': course_id
+    }
+    
+    extra_params = {'includenotenrolledcourses': 1}
+    assignments = moodle_api_call(params, extra_params)
+    
+    if not assignments.get('courses'):
+        print("No courses found.")
+        return []
+
+    courses = assignments['courses']
+    if not courses:
+        print("No courses returned from API.")
+        return []
+
+    course_data = courses[0]
+
+    if 'assignments' not in course_data:
+        print(f"No assignments found for course: {course_data.get('fullname')}")
+        return []
+
+    return course_data['assignments']
+
+# Function to get submissions for a specific assignment
+def get_assignment_submissions(assignment_id):
+    params = {
+        'wstoken': TOKEN,
+        'wsfunction': 'mod_assign_get_submissions',
+        'moodlewsrestformat': 'json',
+        'assignmentids[0]': assignment_id
+    }
+    submissions = moodle_api_call(params)
+
+    if not submissions.get('assignments'):
+        return []
+
+    assignments_data = submissions.get('assignments', [])
+    if not assignments_data:
+        print("No assignments data returned from API.")
+        return []
+
+    assignment_data = assignments_data[0]
+
+    if 'submissions' not in assignment_data:
+        print(f"No submissions found for assignment: {assignment_id}")
+        return []
+
+    return assignment_data['submissions']
+
+# Function to download a file from a given URL
+def download_file(url):
+    response = requests.get(url)
+    if response.status_code == 200:
+        return response.content
+    else:
+        raise Exception(f"Failed to download file: {response.status_code}, URL: {url}")
+
+# Function to extract text from a PDF file
+def extract_text_from_pdf(file_content):
+    try:
+        doc = fitz.open(stream=file_content, filetype="pdf")
+        text = ""
+        for page in doc:
+            text += page.get_text()
+        return text
+    except Exception as e:
+        return f"Error extracting text from PDF: {str(e)}"
+
+# Function to extract text from a DOCX file
+def extract_text_from_docx(file_content):
+    with io.BytesIO(file_content) as f:
+        doc = Document(f)
+        return "\n".join([para.text for para in doc.paragraphs])
+
+# Function to extract text from a TXT file
+def extract_text_from_txt(file_content):
+    return file_content.decode('utf-8')
+
+# Function to extract text from an image file
+def extract_text_from_image(file_content):
+    image = Image.open(io.BytesIO(file_content))
+    return pytesseract.image_to_string(image)
+
+# Function to extract text from a submission file based on file type
+def extract_text_from_submission(file):
+    file_url = file['fileurl']
+    file_url_with_token = f"{file_url}&token={TOKEN}" if '?' in file_url else f"{file_url}?token={TOKEN}"
+    print(f"Downloading file from URL: {file_url_with_token}")  # Log the file URL
+    
+    file_content = download_file(file_url_with_token)
+    file_name = file['filename'].lower()
+    print(f"Processing file: {file_name}")  # Log the file name
+
+    try:
+        if file_name.endswith('.pdf'):
+            return extract_text_from_pdf(file_content)
+        elif file_name.endswith('.docx'):
+            return extract_text_from_docx(file_content)
+        elif file_name.endswith('.txt'):
+            return extract_text_from_txt(file_content)
+        elif file_name.endswith(('.png', '.jpg', '.jpeg')):
+            return extract_text_from_image(file_content)
+        else:
+            return "Unsupported file format."
+    except Exception as e:
+        return f"Error extracting text: {str(e)}"
+
+# Function to extract Q&A pairs using regex
+def extract_qa_pairs(text):
+    qa_pairs = re.findall(r'(Q\d+:\s.*?\nA\d+:\s.*?(?=\nQ\d+:|\Z))', text, re.DOTALL)
+    if not qa_pairs:
+        return [text.strip()]
+    return [pair.strip() for pair in qa_pairs]
+
+# Function to send Q&A pair to grading endpoint and get response
+async def process_user_submissions(user, submissions_by_user, activity_type):
+    user_id = user['id']
+    user_fullname = user['fullname']
+    user_email = user['email']
+    user_submission = submissions_by_user.get(user_id)
+    
+    if not user_submission:
+        return {
+            "Full Name": user_fullname,
+            "User ID": user_id,
+            "Email": user_email,
+            "Total Score": 0,
+            "Feedback": "No submission"
+        }
+    
+    total_score = 0
+    all_comments = []
+
+    if activity_type == 'assignment':
+        for plugin in user_submission['plugins']:
+            if plugin['type'] == 'file':
+                for filearea in plugin['fileareas']:
+                    for file in filearea['files']:
+                        try:
+                            print(f"\nProcessing file: {file['filename']} for {user_fullname}...")
+                            text = extract_text_from_submission(file)
+                            qa_pairs = extract_qa_pairs(text)
+                            print("QAPAIRS", qa_pairs)
+                            for i, qa_pair in enumerate(qa_pairs):
+                                try:
+                                    # Call the OllamaGA function directly
+                                    result = await ollama_aga({"query": qa_pair})
+                                    justification = result.get("justification")
+                                    avg_score = result.get("average_score")
+                                    total_score += avg_score
+                                    comment = f"Q{i+1}: {justification}"
+                                    all_comments.append(comment)
+
+                                    print(f"  Graded Q{i+1}: Avg. Score = {avg_score:.2f} - {justification}")
+                                    
+                                except Exception as e:
+                                    print(f"  Error grading Q&A pair {i+1} for {user_fullname}: {str(e)}")
+                        except Exception as e:
+                            print(f"  Error extracting text for {user_fullname}: {str(e)}")
+
+    feedback = " | ".join(all_comments)
+    return {
+        "Full Name": user_fullname,
+        "User ID": user_id,
+        "Email": user_email,
+        "Total Score": total_score,
+        "Feedback": feedback
+    }
+
+# Function to get course details by ID
+def get_course_by_id(course_id):
+    params = {
+        'wstoken': TOKEN,
+        'wsfunction': 'core_course_get_courses',
+        'moodlewsrestformat': 'json',
+        'options[ids][0]': course_id
+    }
+    return moodle_api_call(params)
+
+# Function to write data to a CSV file in Moodle-compatible format
+def write_to_csv(data, course_id, assignment_name):
+    filename = f"Course_{course_id}_{assignment_name.replace(' ', '_')}_autograded.csv"
+    with open(filename, mode='w', newline='', encoding='utf-8') as file:
+        writer = csv.writer(file)
+        
+        writer.writerow(["Full Name", "User ID", "Email", "Total Score", "Feedback"])
+        
+        for row in data:
+            writer.writerow([row["Full Name"], row["User ID"], row["Email"], row["Total Score"], row["Feedback"]])
+
+    print(f"Data successfully written to CSV file: {filename}")
+
+# Function to update a user's grade in Moodle
+def update_grade(user_id, assignment_id, grade, feedback):
+    params = {
+        'wstoken': TOKEN,
+        'wsfunction': 'mod_assign_save_grade',
+        'moodlewsrestformat': 'json',
+        'assignmentid': assignment_id,
+        'userid': user_id,
+        'grade': grade, 
+        'feedback': feedback
+    }
+    response = moodle_api_call(params)
+    print(f"Grade updated for User ID: {user_id}, Status: {response}")
+
+# Main function to integrate with Moodle
+async def moodle_integration_pipeline(course_shortname, assignment_name, activity_type):
+    try:
+
+        print(f"\n=== Fetching Course Details for Shortname: {course_shortname} ===")
+        course_id, course_name = get_course_info_by_shortname(course_shortname)
+        print(f"Course ID: {course_id}, Course Name: {course_name}")
+        # Fetching course details
+        print(f"\n=== Fetching Course Details for Course ID: {course_id} ===")
+        course_details = get_course_by_id(course_id)
+        if not course_details:
+            raise Exception("Course not found.")
+        course_name = course_details[0]['fullname']
+        print(f"Course Name: {course_name}")
+
+        # Fetching enrolled users
+        print("\n=== Fetching Enrolled Users ===")
+        users = get_enrolled_users(course_id)
+        print(f"Found {len(users)} enrolled users.")
+
+        if activity_type == 'assignment':
+            # Fetching assignments
+            print("\n=== Fetching Assignments ===")
+            activities = get_assignments(course_id)
+        else:
+            raise Exception("Unsupported activity type.")
+
+        print(f"Found {len(activities)} {activity_type}s.")
+
+        # Matching the activity by name
+        activity = next((a for a in activities if a['name'].strip().lower() == assignment_name.strip().lower()), None)
+        if not activity:
+            raise Exception(f"{activity_type.capitalize()} not found.")
+
+        activity_id = activity['id']
+        print(f"{activity_type.capitalize()} '{assignment_name}' found with ID: {activity_id}")
+
+        # Fetching submissions for the assignment
+        print("\n=== Fetching Submissions ===")
+        submissions = get_assignment_submissions(activity_id)
+
+        print(f"Found {len(submissions)} submissions.")
+
+        submissions_by_user = {s['userid']: s for s in submissions}
+
+        # Processing submissions
+        print("\n=== Processing Submissions ===")
+        tasks = [process_user_submissions(user, submissions_by_user, activity_type) for user in users]
+        processed_data = await asyncio.gather(*tasks)
+
+        # Writing data to CSV
+        print("\n=== Writing Data to CSV ===")
+        write_to_csv(processed_data, course_id, assignment_name)
+
+        print("\n=== Processing Completed Successfully ===")
+        return processed_data
+
+    except Exception as e:
+        print(f"\nAn error occurred: {str(e)}")
+        raise
+
+@app.post("/api/process")
+async def grade_assignment(request: Request):
+    data = await request.json()
+    course_shortname = data.get("course_shortname")
+    assignment_name = data.get("assignment_name")
+    activity_type = "assignment"
+
+    try:
+        processed_data = await moodle_integration_pipeline(course_shortname, assignment_name, activity_type)
+        return JSONResponse(content={"status": "success", "message": "Grading completed successfully", "data": processed_data})
+    except Exception as e:
+        return JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
+
+
+
+ 
 @app.post("/api/ollamaAGA")
 async def ollama_aga(request: QueryRequest):
-    query = request.query
-    context = await make_request(query)
+    context = await make_request(request.query)
     if context is None:
-        raise HTTPException(status_code=500, detail="Failed to fetch context")
-    variants, scores = await grading_assistant(query, context)
-    print(scores)
+        raise Exception("Failed to fetch context")
+    
+    variants, avg_score = await grading_assistant(request.query, context)
+    
     response = {
         "justification": variants,
-        "scores": scores
+        "average_score": avg_score
     }
+    
+    return response
+
+@app.post("/api/spandachat")
+async def spanda_chat(request: QueryRequest):
+    context = await make_request(request.query)
+    if context is None:
+        raise Exception("Failed to fetch context")
+    
+    answer = await chatbot(request.query, context)
+    
+    response = {
+        "answer": answer
+    }
+    
     return response
 
 @app.post("/api/ollamaAQG")
-async def ollama_aqg(request: QueryRequest):
+async def ollama_aqg(request: QueryRequestaqg):
     query = request.query
+    n = request.NumberOfVariants
     context = await make_request(query)
-    variants, variants_dict = await generate_question_variants(query, context)
+    variants, variants_dict = await generate_question_variants(query, n, context)
     response = {
         "variants": variants,
         "variants_dict": variants_dict
     }
-    return {"variants": variants}
+    return response
 
 
 @app.post("/api/ollamaAFE")
 async def ollama_afe(request: QueryRequest):
     dimensions = {
-        "Communication Clarity": "The ability to convey information and instructions clearly and effectively so that students can easily understand the material being taught.\n"
-                                "0: Instructions are often vague or confusing, leading to frequent misunderstandings among students.\n"
-                                "Example: 'Read the text and do the thing.'\n"
-                                "1: Occasionally provides clear instructions but often lacks detail, requiring students to ask for further clarification.\n"
-                                "Example: 'Read the chapter and summarize it.'\n"
-                                "2: Generally clear and detailed in communication, though sometimes slightly ambiguous.\n"
-                                "Example: 'Read chapter 3 and summarize the main points in 200 words.'\n"
-                                "3: Always communicates instructions and information clearly, precisely, and comprehensively, ensuring students fully understand what is expected.\n"
-                                "Example: 'Read chapter 3, identify the main points, and write a 200-word summary. Make sure to include at least three key arguments presented by the author.'",
-
-        "Punctuality": "Consistently starting and ending classes on time, as well as meeting deadlines for assignments and other class-related activities.\n"
-                    "0: Frequently starts and ends classes late, often misses deadlines for assignments and class-related activities.\n"
-                    "Example: Class is supposed to start at 9:00 AM but often begins at 9:15 AM, and assignments are returned late.\n"
-                    "1: Occasionally late to start or end classes and sometimes misses deadlines.\n"
-                    "Example: Class sometimes starts a few minutes late, and assignments are occasionally returned a day late.\n"
-                    "2: Generally punctual with minor exceptions, mostly meets deadlines.\n"
-                    "Example: Class starts on time 90%' of the time, and assignments are returned on the due date.\n"
-                    "3: Always starts and ends classes on time, consistently meets deadlines for assignments and other activities.\n"
-                    "Example: Class starts exactly at 9:00 AM every day, and assignments are always returned on the specified due date.",
-
-        "Positivity": "Maintaining a positive attitude, providing encouragement, and fostering a supportive and optimistic learning environment.\n"
-                    "0: Rarely displays a positive attitude, often appears disengaged or discouraging.\n"
-                    "Example: Rarely smiles or offers encouragement, responds negatively to student questions.\n"
-                    "1: Occasionally positive, but can be inconsistent in attitude and support.\n"
-                    "Example: Sometimes offers praise but often seems indifferent.\n"
-                    "2: Generally maintains a positive attitude and provides encouragement, though with occasional lapses.\n"
-                    "Example: Usually offers praise and support but has off days.\n"
-                    "3: Consistently maintains a positive and encouraging attitude, always fostering a supportive and optimistic environment.\n"
-                    "Example: Always greets students warmly, frequently provides positive feedback and encouragement.",
-
-        "Personal Engagement": "Taking an active interest in each student's learning experience, addressing individual needs, and building meaningful connections with students.\n"
-                            "0: Shows little to no interest in individual students' learning experiences.\n"
-                            "Example: Rarely interacts with students one-on-one or addresses their unique needs.\n"
-                            "1: Occasionally engages with students on a personal level, but is often superficial.\n"
-                            "Example: Knows some students' names but rarely follows up on individual progress.\n"
-                            "2: Generally takes an interest in students' learning experiences and addresses individual needs, with some inconsistency.\n"
-                            "Example: Knows most students' names and occasionally checks in on their progress.\n"
-                            "3: Actively engages with each student, consistently addressing individual needs and building meaningful connections.\n"
-                            "Example: Knows all students by name, frequently checks in on their progress, and offers personalized support.",
-
-        "Classroom Management Practices": "Implementing strategies to maintain order, minimize disruptions, and ensure a productive and respectful classroom environment.\n"
-                                        "0: Lacks effective strategies, leading to frequent disruptions and a chaotic environment.\n"
-                                        "Example: Students often talk over the teacher, and the class frequently gets off-topic.\n"
-                                        "1: Occasionally implements management strategies but is often inconsistent, leading to some disruptions.\n"
-                                        "Example: Sometimes establishes rules, but often fails to enforce them.\n"
-                                        "2: Generally uses effective strategies to maintain order, with minor disruptions.\n"
-                                        "Example: Establishes rules and usually enforces them, with occasional lapses.\n"
-                                        "3: Consistently implements effective strategies, maintaining a productive and respectful environment.\n"
-                                        "Example: Establishes clear rules from day one, consistently enforces them, and quickly addresses any disruptions.",
-
-        "Adherence to Rules": "Consistently following and enforcing classroom and school policies, ensuring that both the teacher and students abide by established guidelines.\n"
-                            "0: Frequently disregards classroom and school policies, leading to a lack of structure.\n"
-                            "Example: Often allows food in the classroom despite school policy.\n"
-                            "1: Occasionally follows and enforces rules but is inconsistent, causing confusion.\n"
-                            "Example: Enforces some rules strictly but ignores others.\n"
-                            "2: Generally adheres to and enforces rules, with minor inconsistencies.\n"
-                            "Example: Mostly follows and enforces policies, with occasional lapses.\n"
-                            "3: Always follows and strictly enforces classroom and school policies.\n"
-                            "Example: Consistently enforces no-phone policy and dress code.",
-
-        "Classroom Atmosphere": "Creating a welcoming, inclusive, and comfortable environment that promotes learning and collaboration among students.\n"
-                                "0: Creates an unwelcoming or hostile environment, making students feel uncomfortable.\n"
-                                "Example: Classroom feels tense, and students are afraid to ask questions.\n"
-                                "1: Occasionally welcoming but often fails to create an inclusive or comfortable environment.\n"
-                                "Example: Some students feel included, but others do not.\n"
-                                "2: Generally creates a welcoming and inclusive environment, with minor exceptions.\n"
-                                "Example: Most students feel comfortable and included, but not all.\n"
-                                "3: Consistently fosters a welcoming, inclusive, and comfortable atmosphere.\n"
-                                "Example: All students feel safe, included, and encouraged to participate.",
-
-        "Student Participation": "Encouraging and facilitating active involvement from all students in class discussions, activities, and assignments.\n"
-                                "0: Rarely encourages or facilitates student involvement, resulting in minimal participation.\n"
-                                "Example: Few students ever raise their hands or engage in discussions.\n"
-                                "1: Occasionally encourages participation but lacks consistency, leading to uneven involvement.\n"
-                                "Example: Encourages participation during some activities but not others.\n"
-                                "2: Generally encourages and facilitates active involvement, with some students more engaged than others.\n"
-                                "Example: Most students participate regularly, but a few remain disengaged.\n"
-                                "3: Consistently encourages and ensures active involvement from all students.\n"
-                                "Example: Uses various strategies to engage all students, such as group discussions and interactive activities."
+        # Example structure, fill in with actual dimensions and sub-dimensions
+      "Mastery of the Subject": {
+            "weight": 0.169,
+            "sub-dimensions": {
+                "Knowledge of Content and Pedagogy": {
+                    "weight": 0.362,
+                    "definition": "A deep understanding of their subject matter and the best practices for teaching it.",
+                    "example": "In a mathematics course on real analysis, the professor demonstrates best practices by Guiding students through the process of constructing formal proofs step-by-step, highlighting common pitfalls and techniques for overcoming them.",
+                    "criteria": {
+                        1: "The transcript demonstrates minimal knowledge of content and ineffective pedagogical practices",
+                        2: "The transcript demonstrates basic content knowledge but lacks pedagogical skills",
+                        3: "The transcript demonstrates adequate content knowledge and uses some effective pedagogical practices",
+                        4: "The transcript demonstrates strong content knowledge and consistently uses effective pedagogical practices",
+                        5: "The transcript demonstrates exceptional content knowledge and masterfully employs a wide range of pedagogical practices"
+                    }
+                },
+                # "Breadth of Coverage": {
+                #     "weight": 0.327,
+                #     "definition": "Awareness of different possible perspectives related to the topic taught",
+                #     "example": "Teacher discusses different theoretical views, current and prior scientific developments, etc.",
+                #     "criteria": {
+                #         1: "The transcript shows that the instructor covers minimal content with significant gaps in the curriculum",
+                #         2: "The transcript shows that the instructor covers some content but with notable gaps in the curriculum",
+                #         3: "The transcript shows that the instructor covers most of the required content with minor gaps",
+                #         4: "The transcript shows that the instructor covers all required content thoroughly",
+                #         5: "The transcript shows that the instructor covers all required content and provides additional enrichment material"
+                #     }
+                # },
+                "Knowledge of Resources": {
+                    "weight": 0.310,
+                    "definition": "Awareness of and utilization of a variety of current resources in the subject area to enhance instruction",
+                    "example": "The teacher cites recent research studies or books while explaining relevant concepts.",
+                    "criteria": {
+                        1: "The transcript shows that the instructor demonstrates minimal awareness of resources available for teaching",
+                        2: "The transcript shows that the instructor demonstrates limited knowledge of resources and rarely incorporates them",
+                        3: "The transcript shows that the instructor demonstrates adequate knowledge of resources and sometimes incorporates them",
+                        4: "The transcript shows that the instructor demonstrates strong knowledge of resources and frequently incorporates them",
+                        5: "The transcript shows that the instructor demonstrates extensive knowledge of resources and consistently incorporates a wide variety of them"
+                    }
+                }
+            }
+        },
+        "Expository Quality": {
+            "weight": 0.179,
+            "sub-dimensions": {
+                "Content Clarity": {
+                    "weight": 0.266,
+                    "definition": "Extent to which the teacher is able to explain the content to promote clarity and ease of understanding.",
+                    "example": "Teacher uses simple vocabulary and concise sentences to explain complex concepts.",
+                    "criteria": {
+                        1: "Does not break down complex concepts, uses confusing, imprecise, and inappropriate language, and does not employ any relevant techniques or integrate them into the lesson flow.",
+                        2: "Inconsistently breaks down complex concepts using language that is sometimes confusing or inappropriate, employing few minimally relevant techniques that contribute little to student understanding, struggling to integrate them into the lesson flow.",
+                        3: "Generally breaks down complex concepts using simple, precise language and some techniques that are somewhat relevant and contribute to student understanding, integrating them into the lesson flow with occasional inconsistencies.",
+                        4: "Frequently breaks down complex concepts using simple, precise language and a variety of relevant, engaging techniques that contribute to student understanding.",
+                        5: "Consistently breaks down complex concepts using simple, precise language and a wide variety of highly relevant, engaging techniques such as analogies, examples, visuals, etc. to student understanding, seamlessly integrating them into the lesson flow."
+                    }
+                },
+                # "Demonstrating Flexibility and Responsiveness": {
+                #     "weight": 0.248,
+                #     "definition": "Ability to adapt to the changing needs of the students in the class while explaining the concepts.",
+                #     "example": "The teacher tries to explain a concept using a particular example. On finding that the students are unable to understand, the teacher is able to produce alternate examples or explanation strategies to clarify the concept.",
+                #     "criteria": {
+                #         1: "Fails to adapt explanations based on student needs and does not provide alternate examples or strategies.",
+                #         2: "Rarely adapts explanations, often sticking to the same methods even when students struggle to understand.",
+                #         3: "Sometimes adapts explanations and provides alternate examples or strategies, but with limited effectiveness.",
+                #         4: "Frequently adapts explanations and offers a variety of alternate examples or strategies that aid student understanding.",
+                #         5: "Consistently and seamlessly adapts explanations, providing a wide range of highly effective alternate examples or strategies tailored to student needs."
+                #     }
+                # },
+                "Differentiation Strategies": {
+                    "weight": 0.246,
+                    "definition": "The methods and approaches used by the teacher to accommodate diverse student needs, backgrounds, learning styles, and abilities.",
+                    "example": "During a lesson, the teacher divides the class into small groups based on their readiness levels. She provides more advanced problems for students who grasp the concept quickly, while offering additional support and manipulatives for students who need more help.",
+                    "criteria": {
+                        1: "Uses no differentiation strategies to meet diverse student needs",
+                        2: "Uses minimal differentiation strategies with limited effectiveness",
+                        3: "Uses some differentiation strategies with moderate effectiveness",
+                        4: "Consistently uses a variety of differentiation strategies effectively",
+                        5: "Masterfully employs a wide range of differentiation strategies to meet the needs of all learners"
+                    }
+                },
+                "Communication Clarity": {
+                    "weight": 0.238,
+                    "definition": "The ability of the teacher to effectively convey information and instructions to students in a clear and understandable manner.",
+                    "example": "The teachers voice and language is clear with the use of appropriate voice modulation, tone, and pitch to facilitate ease of understanding.",
+                    "criteria": {
+                        1: "Communicates poorly with students, leading to confusion and misunderstandings",
+                        2: "Communicates with some clarity but often lacks precision or coherence",
+                        3: "Communicates clearly most of the time, with occasional lapses in clarity",
+                        4: "Consistently communicates clearly and effectively with students",
+                        5: "Communicates with exceptional clarity, precision, and coherence, ensuring full understanding"
+                    }
+                }
+            }
+        },
+        "Class Management": {
+            "weight": 0.150,
+            "sub-dimensions": {
+                "Punctuality": {
+                    "weight": 0.261,
+                    "definition": "The consistency and timeliness of the teacher's arrival to class sessions, meetings, and other professional obligations.",
+                    "example": "The teacher starts and completes live lectures as per the designated time.",
+                    "criteria": {
+                        1: "Transcripts consistently show late class start times and/or early end times",
+                        2: "Transcripts occasionally show late class start times and/or early end times",
+                        3: "Transcripts usually show on-time class start and end times",
+                        4: "Transcripts consistently show on-time class start and end times",
+                        5: "Transcripts always show early class start times and full preparation to begin class on time"
+                    }
+                },
+                "Managing Classroom Routines": {
+                    "weight": 0.255,
+                    "definition": "The Teacher establishes and maintains efficient routines and procedures to maximize instructional time.",
+                    "example": "The teacher starts every session with a recap quiz to remind learners of what was taught earlier. Students prepare for the recap even before the teacher enters the class in a habitual manner.",
+                    "criteria": {
+                        1: "Classroom routines are poorly managed, leading to confusion and lost instructional time",
+                        2: "Classroom routines are somewhat managed but with frequent disruptions",
+                        3: "Classroom routines are adequately managed with occasional disruptions",
+                        4: "Classroom routines are well-managed, leading to smooth transitions and minimal disruptions",
+                        5: "Classroom routines are expertly managed, maximizing instructional time and creating a seamless learning environment"
+                    }
+                },
+                "Managing Student Behavior": {
+                    "weight": 0.240,
+                    "definition": "The teacher sets clear expectations for behavior and uses effective strategies to prevent and address misbehavior. The teacher encourages student participation and provides fair and equal opportunities to all students in class. The teacher also provides appropriate compliments and feedback to learners’ responses.",
+                    "example": "The teacher addresses a students misbehavior in the class in a professional manner and provides constructive feedback using clear guidelines for student behavior expected in the course.",
+                    "criteria": {
+                        1: "Struggles to manage student behavior, leading to frequent disruptions and an unproductive learning environment. Rarely encourages student participation, with little to no effort to ensure equal opportunities for engagement; provides no or inappropriate feedback and compliments that do not support learning or motivation.",
+                        2: "Manages student behavior with limited effectiveness, with some disruptions and off-task behavior. Inconsistently encourages student participation, with unequal opportunities for engagement; provides limited or generic feedback and compliments that minimally support learning and motivation.",
+                        3: "Manages student behavior adequately, maintaining a generally productive learning environment. Generally encourages student participation and provides opportunities for engagement, but some students may dominate or be overlooked; provides feedback and compliments, but they may not always be specific or constructive.",
+                        4: "Effectively manages student behavior, promoting a positive and productive learning environment. Frequently encourages student participation, provides fair opportunities for engagement, and offers appropriate feedback and compliments that support learning and motivation.",
+                        5: "Expertly manages student behavior, fostering a highly respectful, engaged, and self-regulated learning community. Consistently encourages active participation from all students, ensures equal opportunities for engagement, and provides specific, timely, and constructive feedback and compliments that enhance learning and motivation."
+                    }
+                },
+                # "Adherence to Rules": {
+                #     "weight": 0.242,
+                #     "definition": "The extent to which the teacher follows established rules, procedures, and policies governing classroom conduct and professional behavior.",
+                #     "example": "The teacher reminds the students to not circulate cracked versions of a software on the class discussion forum.",
+                #     "criteria": {
+                #         1: "Consistently disregards or violates school rules and policies",
+                #         2: "Occasionally disregards or violates school rules and policies",
+                #         3: "Generally adheres to school rules and policies with occasional lapses",
+                #         4: "Consistently adheres to school rules and policies",
+                #         5: "Strictly adheres to school rules and policies and actively promotes compliance among students"
+                #     }
+                # }
+            }
+        },
+        "Structuring of Objectives and Content": {
+            "weight": 0.168,
+            "sub-dimensions": {
+                "Organization": {
+                    "weight": 0.338,
+                    "definition": "The extent to which content is presented in a structured and comprehensive manner with emphasis on important content and proper linking content.",
+                    "example": "Teacher starts the class by providing an outline of what all will be covered in that particular class and connects it to previous knowledge of learners.",
+                    "criteria": {
+                        1: "Transcripts indicate content that is poorly organized, with minimal structure and no clear emphasis on important content. Linking between content is absent or confusing.",
+                        2: "Transcripts indicate content that is somewhat organized but lacks a consistent structure and comprehensive coverage. Emphasis on important content is inconsistent, and linking between content is weak",
+                        3: "Transcripts indicate content that is adequately organized, with a generally clear structure and comprehensive coverage. Important content is usually emphasized, and linking between content is present.",
+                        4: "Transcripts indicate content that is well-organized, with a consistent and clear structure and comprehensive coverage. Important content is consistently emphasized, and linking between content is effective.",
+                        5: "Transcripts indicate content that is exceptionally well-organized, with a highly structured, logical, and comprehensive presentation. Important content is strategically emphasized, and linking between content is seamless and enhances learning."
+                    }
+                },
+                "Clarity of Instructional Objectives": {
+                    "weight": 0.342,
+                    "definition": "The clarity and specificity of the learning objectives communicated to students, guiding the focus and direction of instruction.",
+                    "example": "At the start of the lesson, the teacher displays the learning objectives and takes a few moments to explain them to the students.",
+                    "criteria": {
+                        1: "Content is presented in a confusing or unclear manner",
+                        2: "Content is presented with some clarity but with frequent gaps or inconsistencies",
+                        3: "Content is presented with adequate clarity, allowing for general understanding",
+                        4: "Content is presented with consistent clarity, promoting deep understanding",
+                        5: "Content is presented with exceptional clarity, facilitating mastery and transfer of knowledge"
+                    }
+                },
+                "Alignment with the Curriculum": {
+                    "weight": 0.319,
+                    "definition": "The degree to which the teacher's instructional plans and activities align with the prescribed curriculum objectives and standards.",
+                    "example": "The teacher discusses a unit plan that clearly shows the connections between her learning objectives, instructional activities, assessments, and the corresponding curriculum standards.",
+                    "criteria": {
+                        1: "Instruction is poorly aligned with the curriculum, with significant gaps or deviations",
+                        2: "Instruction is somewhat aligned with the curriculum but with frequent inconsistencies",
+                        3: "Instruction is generally aligned with the curriculum, covering most required content",
+                        4: "Instruction is consistently aligned with the curriculum, covering all required content",
+                        5: "Instruction is perfectly aligned with the curriculum, covering all required content and providing meaningful extensions"
+                    }
+                }
+            }
+        },
+        "Qualities of Interaction": {
+            "weight": 0.168,
+            "sub-dimensions": {
+                "Instructor Enthusiasm And Positive demeanor": {
+                    "weight": 0.546,
+                    "definition": "Extent to which a teacher is enthusiastic and committed to making the course interesting, active, dynamic, humorous, etc.",
+                    "example": "Teacher uses an interesting fact or joke to engage the class.",
+                    "criteria": {
+                        1: "Instructor exhibits a negative or indifferent demeanor and lacks enthusiasm for teaching",
+                        2: "Instructor exhibits a neutral demeanor and occasional enthusiasm for teaching",
+                        3: "Instructor exhibits a generally positive demeanor and moderate enthusiasm for teaching",
+                        4: "Instructor exhibits a consistently positive demeanor and strong enthusiasm for teaching",
+                        5: "Instructor exhibits an exceptionally positive demeanor and infectious enthusiasm for teaching, inspiring student engagement"
+                    }
+                },
+                "Individual Rapport": {
+                    "weight": 0.453,
+                    "definition": "Extent to which the teacher develops a rapport with individual students and their concerns during and beyond class hours. The teacher provides assistance, guidance, and resources to help students overcome obstacles, address challenges, and achieve success.",
+                    "example": "Teacher shows an interest in student concerns, and attempts to resolve individual queries both during the class and through forums/individual communication.",
+                    "criteria": {
+                        1: "Minimal or negative rapport with individual students interactions",
+                        2: "Limited rapport with individual students, with infrequent personalized",
+                        3: "Adequate rapport with individual students, with some personalized interactions",
+                        4: "Strong rapport with individual students, with frequent personalized interactions and support",
+                        5: "Exceptional rapport with each individual student, with highly personalized interactions, support, and guidance"
+                    }
+                }
+            }
+        },
+        "Evaluation of Learning": {
+            "weight": 0.163,
+            "sub-dimensions": {
+                "Course Level Assessment": {
+                    "weight": 0.333,
+                    "definition": "The course level assessment is in line with the curriculum of the course and effectively checks whether the course outcomes are being met.",
+                    "example": "The teacher selects or uses test items that reflect the course outcome.",
+                    "criteria": {
+                        1: "The course level assessment is not aligned with the curriculum, does not cover course outcomes, and uses methods that are ineffective in measuring student achievement of these outcomes.",
+                        2: "The course level assessment is poorly aligned with the curriculum, covers few course outcomes, and uses methods that are limited in their ability to effectively measure student achievement of these outcomes.",
+                        3: "The course level assessment is generally aligned with the curriculum, covers some course outcomes, and uses methods that adequately measure student achievement of these outcomes, but may have minor gaps or inconsistencies.",
+                        4: "The course level assessment is well-aligned with the curriculum, covers most course outcomes, and uses appropriate methods to effectively measure student achievement of these outcomes.",
+                        5: "The course level assessment is perfectly aligned with the curriculum, comprehensively covers all course outcomes, and employs highly effective methods to accurately measure student achievement of these outcomes."
+                    }
+                },
+                "Clear Grading Criteria": {
+                    "weight": 0.333,
+                    "definition": "The teacher uses a clear and structured rubric which is communicated to the learners prior to any evaluation. The teacher is not biased in their assessment of learner performance.",
+                    "example": "The teacher discusses the assessment rubric by providing examples of good responses and the criteria for grading with the learners before conducting any tests.",
+                    "criteria": {
+                        1: "The teacher rarely or never uses a rubric, does not communicate assessment criteria to learners before evaluation, and the teacher's assessment is highly biased and unfair.",
+                        2: "The teacher inconsistently uses a rubric that is poorly structured or not clearly communicated to learners before evaluation, and the teacher's assessment may be noticeably biased at times.",
+                        3: "The teacher generally uses a rubric that is communicated to learners before evaluation, but the rubric may lack some clarity or structure, and the teacher's assessment may occasionally show minor bias.",
+                        4: "The teacher frequently uses a clear and structured rubric that is communicated to learners prior to evaluation, and applies the rubric fairly to all learners with minimal bias.",
+                        5: "The teacher consistently uses a well-defined, comprehensive rubric that is clearly communicated to learners well in advance of any evaluation, and applies the rubric objectively and fairly to all learners without any bias."
+                    }
+                },
+                "Assignments/readings": {
+                    "weight": 0.332,
+                    "definition": "The teacher provides assignments/homework/literature which is relevant and contributes to a deeper understanding of the topics taught to track the progress of learners. The teacher also discusses the solutions and feedback based on previously assigned homework/assignment.",
+                    "example": "The teacher provides clear instructions on the homework task that the students are given and how it is relevant to the topics taught in class. In the following class, the teacher discusses the answers and any common mistakes made by learners.",
+                    "criteria": {
+                        1: "The teacher rarely or never provides relevant assignments, homework, or literature that contribute to understanding the topics taught, does not track learner progress, and fails to discuss solutions and feedback based on previous work.",
+                        2: "The teacher inconsistently provides assignments, homework, and literature that are minimally relevant and contribute little to understanding the topics taught, rarely tracks learner progress, and seldom discusses solutions and feedback based on previous work.",
+                        3: "The teacher generally provides assignments, homework, and literature that are somewhat relevant and contribute to understanding the topics taught, occasionally tracks learner progress, and sometimes discusses solutions and feedback based on previous work.",
+                        4: "The teacher frequently provides relevant assignments, homework, and literature that contribute to a deeper understanding of the topics taught, tracks learner progress, and discusses solutions and feedback based on previously assigned work.",
+                        5: "The teacher consistently provides highly relevant and challenging assignments, homework, and literature that significantly deepen learners' understanding of the topics taught, regularly tracks learner progress, and engages in thorough discussions of solutions and feedback based on previous work."
+                    }
+                }
+            }
+        }
+    
     }
-
 
     instructor_name = request.query
 
     all_responses = {}
     all_scores = {}
 
-    for dimension, explanation in dimensions.items():
-        query = f"Judge {instructor_name} based on {dimension}."
-        context = await make_request(query)  # Assuming make_request is defined elsewhere to get the context
-        # print(f"CONTEXT for {dimension}:")
-        # print(context)  # Print the context generated
-        result_responses, result_scores = await instructor_eval(instructor_name, context, dimension, explanation)
-        print(result_responses)
-        print(result_scores)
-        # Extract only the message['content'] part and store it
-        all_responses[dimension] = result_responses[dimension]['message']['content']
-        all_scores[dimension] = result_scores[dimension]
-    
-    print("SCORES:")
-    print(json.dumps(all_scores, indent=2))
+    for master_trait, explanation in dimensions.items():
+        for sub_trait, details in explanation["sub-dimensions"].items():
+            query = f"Judge {instructor_name} based on {sub_trait} under {master_trait}."
+            context = await make_request(query)  # Assuming make_request is defined elsewhere to get the context
+
+            combined_explanation = f"Definition: {details['definition']}\n"
+            combined_explanation += f"Example: {details['example']}\n"
+            combined_explanation += "Criteria:\n"
+            for score, criteria in details["criteria"].items():
+                combined_explanation += f"{score}: {criteria}\n"
+
+            result_responses, result_scores = await instructor_eval(instructor_name, context, sub_trait, combined_explanation)
+            
+            if master_trait not in all_responses:
+                all_responses[master_trait] = {}
+                all_scores[master_trait] = {}
+
+            # Store the response and score for each sub_trait under its master_trait
+            all_responses[master_trait][sub_trait] = result_responses[sub_trait]['message']['content']
+            all_scores[master_trait][sub_trait] = result_scores[sub_trait]
+
     response = {
         "DOCUMENT": all_responses,
         "SCORES": all_scores
     }
     
+
     return response
-
-
 
 
 
@@ -988,6 +1702,7 @@ class ImportPayload(BaseModel):
 
 class QueryRequest(BaseModel):
     query: str
+
 
 @app.post("/api/upload_transcript")
 async def upload_transcript(payload: ImportPayload):
@@ -1171,7 +1886,7 @@ async def resume_eval(resume_name, jd_name, context, score_criterion, explanatio
         }
     }
 
-    response = await asyncio.to_thread(ollama.chat, model='llama3', messages=payload['messages'], stream=payload['stream'])
+    response = await asyncio.to_thread(ollama.chat, model='llama3.1', messages=payload['messages'], stream=payload['stream'])
     responses[score_criterion] = response
     content = response['message']['content']
 
@@ -1271,7 +1986,7 @@ async def resume_eval(resume_name, jd_name, context, score_criterion, explanatio
         "stream": False  # Assuming that streaming is set to False, adjust based on your implementation
     }
 
-    eval_response = await asyncio.to_thread(ollama.chat, model='llama3', messages=payload['messages'])  # Assuming chat function is defined to handle the completion request
+    eval_response = await asyncio.to_thread(ollama.chat, model='llama3.1', messages=payload['messages'])  # Assuming chat function is defined to handle the completion request
 
     # Log the eval_response to see its structure
     print("eval_response:", eval_response)

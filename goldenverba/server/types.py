@@ -52,6 +52,10 @@ class ImportPayload(BaseModel):
 class QueryRequest(BaseModel):
     query: str
 
+class QueryRequestaqg(BaseModel):
+    query: str
+    NumberOfVariants: int
+
 class ConfigPayload(BaseModel):
     config: dict
 
@@ -63,3 +67,10 @@ class GetComponentPayload(BaseModel):
 class SetComponentPayload(BaseModel):
     component: str
     selected_component: str
+
+class MoodleRequest(BaseModel):
+    course_name: str
+    assignment_name: str
+
+class CourseIDRequest(BaseModel):
+    course_shortname: str
