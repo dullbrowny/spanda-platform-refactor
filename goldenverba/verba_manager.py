@@ -490,7 +490,8 @@ class VerbaManager:
 
         msg.info("Added query to suggestions")
 
-    def retrieve_chunks(self, queries: list[str]) -> list[Chunk]:
+    def retrieve_chunks(self, queries: list[str], course_id: str = None) -> tuple[list[Chunk], str]:
+        print(f"Initial course_id: {course_id}")
         chunks, context = self.retriever_manager.retrieve(
             queries,
             self.client,
@@ -499,6 +500,20 @@ class VerbaManager:
                 self.generator_manager.selected_generator
             ],
         )
+        
+        if course_id:
+            course_id = course_id.strip().lower()
+            print(f"Filtering chunks with course_id: {course_id}")
+            
+            # Debug print each chunk's doc_name
+            for chunk in chunks:
+                print(f"Chunk doc_name: {chunk.doc_name.lower()}")
+                
+            chunks = [chunk for chunk in chunks if chunk.doc_name.lower().startswith(course_id)]
+
+        # Debug print to verify filtered chunks
+        print(f"Filtered chunks: {chunks}")
+
         return chunks, context
 
     def retrieve_all_documents(self, doc_type: str, page: int, pageSize: int) -> list:

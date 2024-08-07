@@ -344,10 +344,13 @@ async def update_config(payload: ConfigPayload):
 @app.post("/api/query")
 async def query(payload: QueryPayload):
     msg.good(f"Received query: {payload.query}")
+    msg.good(payload.query + "lol")
     start_time = time.time()  # Start timing
-    try:
-        chunks, context = manager.retrieve_chunks([payload.query])
+            # chunks, context = manager.retrieve_chunks([payload.query], course_id={payload.course_id})  
+    print(payload.course_id + "inapi.py")
 
+    try:
+        chunks, context = manager.retrieve_chunks(payload.query, payload.course_id)
         retrieved_chunks = [
             {
                 "text": chunk.text,
@@ -359,8 +362,9 @@ async def query(payload: QueryPayload):
             }
             for chunk in chunks
         ]
-        elapsed_time = round(time.time() - start_time, 2)  # Calculate elapsed time
-        msg.good(f"Succesfully processed query: {payload.query} in {elapsed_time}s")
+        print(retrieved_chunks)
+        elapsed_time = round(time.time() - start_time, 2)  
+        msg.good(f"Succesfully processed query: {payload.query} in {elapsed_time}s")    
 
         if len(chunks) == 0:
             return JSONResponse(
@@ -1346,21 +1350,6 @@ async def spanda_chat(request: QueryRequest):
         "answer": answer
     }
     
-    return response
-
-
-@app.post("/api/ollamaAGA")
-async def ollama_aga(query):
-    context = await make_request(query)
-    
-    if context is None:
-        raise Exception("Failed to fetch context")
-    
-    variants, avg_score= await grading_assistant(query, context)
-    response = {
-        "justification": variants,
-        "average_score": avg_score
-    }
     return response
 
 
