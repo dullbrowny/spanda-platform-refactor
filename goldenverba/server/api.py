@@ -949,27 +949,22 @@ async def generate_question_variants(base_question, n, context):
 
         #### Single-Part Questions:
 
-        1. **Original Question**: original_question
-        2. **Variant 1**: variant_1
-        3. **Variant 2**: variant_2
-        4. **Variant 3**: variant_3
-        5. **Variant 4**: variant_4
-        6. **Variant 5**: variant_5
+        1. Variant 1: variant_1
+        2. Variant 2: variant_2
+        3. Variant 3: variant_3
+        4. Variant 4: variant_4
+        5. Variant 5: variant_5
 
         #### Multi-Part Questions:
 
-        1. **Original Question**: 
-        - Part A: original_question_part_a
-        - Part B: original_question_part_b
-        - Part C: original_question_part_c
-        2. **Variant 1**: 
-        - Part A: variant_1_part_a
-        - Part B: variant_1_part_b
-        - Part C: variant_1_part_c
-        3. **Variant 2**: 
-        - Part A: variant_2_part_a
-        - Part B: variant_2_part_b
-        - Part C: variant_2_part_c
+        1. Variant 1: 
+          a. variant_1_part_a
+          b. variant_1_part_b
+          c. variant_1_part_c
+        2. Variant 2: 
+          a. variant_2_part_a
+          b. variant_2_part_b
+          c. variant_2_part_c
 
         Utilize these guidelines to generate distinct and engaging questions based on the given context.
     """
