@@ -350,10 +350,12 @@ async def update_config(payload: ConfigPayload):
 @app.post("/api/query")
 async def query(payload: QueryPayload):
     msg.good(f"Received query: {payload.query}")
+    msg.good(payload.query + "lol")
     start_time = time.time()  # Start timing
-    try:
-        chunks, context = manager.retrieve_chunks([payload.query])
+    # print(payload.course_id + "inapi.py")
 
+    try:
+        chunks, context = manager.retrieve_chunks(payload.query, payload.course_id)
         retrieved_chunks = [
             {
                 "text": chunk.text,
@@ -365,8 +367,9 @@ async def query(payload: QueryPayload):
             }
             for chunk in chunks
         ]
-        elapsed_time = round(time.time() - start_time, 2)  # Calculate elapsed time
-        msg.good(f"Succesfully processed query: {payload.query} in {elapsed_time}s")
+        # print(retrieved_chunks)
+        elapsed_time = round(time.time() - start_time, 2)  
+        msg.good(f"Succesfully processed query: {payload.query} in {elapsed_time}s")    
 
         if len(chunks) == 0:
             return JSONResponse(
@@ -554,71 +557,100 @@ async def make_request(query_user):
 
 
 async def grading_assistant(question_answer_pair, context):
-    user_context = " ".join(context)
-    rubric_content = f"""<s> [INST] Please act as an impartial judge and evaluate the quality of the provided answer which attempts to answer the provided question based on a provided context.
-            You'll be given context, question and answer to submit your reasoning and score for the correctness, comprehensiveness and readability of the answer. 
-            
-            Below is your grading rubric: 
-            - Correctness: If the answer correctly answers the question, below are the details for different scores:
-            - Score 0: the answer is completely incorrect, doesn't mention anything about the question or is completely contrary to the correct answer.
-                - For example, when asked “How to terminate a databricks cluster”, the answer is an empty string, or content that's completely irrelevant, or sorry I don't know the answer.
-            - Score 1: the answer provides some relevance to the question and answers one aspect of the question correctly.
-                - Example:
-                    - Question: How to terminate a databricks cluster
-                    - Answer: Databricks cluster is a cloud-based computing environment that allows users to process big data and run distributed data processing tasks efficiently.
-                    - Or answer:  In the Databricks workspace, navigate to the "Clusters" tab. And then this is a hard question that I need to think more about it
-            - Score 2: the answer mostly answers the question but is missing or hallucinating on one critical aspect.
-                - Example:
-                    - Question: How to terminate a databricks cluster”
-                    - Answer: “In the Databricks workspace, navigate to the "Clusters" tab.
-                    Find the cluster you want to terminate from the list of active clusters.
-                    And then you'll find a button to terminate all clusters at once”
-            - Score 3: the answer correctly answers the question and is not missing any major aspect. In this case, to score correctness 3, the final answer must be correct, final solution for numerical problems is of utmost importance.
-                - Example:
-                    - Question: How to terminate a databricks cluster
-                    - Answer: In the Databricks workspace, navigate to the "Clusters" tab.
-                    Find the cluster you want to terminate from the list of active clusters.
-                    Click on the down-arrow next to the cluster name to open the cluster details.
-                    Click on the "Terminate" button. A confirmation dialog will appear. Click "Terminate" again to confirm the action.”
-            - Comprehensiveness: How comprehensive is the answer, does it fully answer all aspects of the question and provide comprehensive explanation and other necessary information. Below are the details for different scores:
-            - Score 0: typically if the answer is completely incorrect, then the comprehensiveness is also zero.
-            - Score 1: if the answer is correct but too short to fully answer the question, then we can give score 1 for comprehensiveness.
-                - Example:
-                    - Question: How to use databricks API to create a cluster?
-                    - Answer: First, you will need a Databricks access token with the appropriate permissions. You can generate this token through the Databricks UI under the 'User Settings' option. And then (the rest is missing)
-            - Score 2: the answer is correct and roughly answers the main aspects of the question, but it's missing description about details. Or is completely missing details about one minor aspect.
-                - Example:
-                    - Question: How to use databricks API to create a cluster?
-                    - Answer: You will need a Databricks access token with the appropriate permissions. Then you'll need to set up the request URL, then you can make the HTTP Request. Then you can handle the request response.
-                - Example:
-                    - Question: How to use databricks API to create a cluster?
-                    - Answer: You will need a Databricks access token with the appropriate permissions. Then you'll need to set up the request URL, then you can make the HTTP Request. Then you can handle the request response.
-            - Score 3: the answer is correct, and covers all the main aspects of the question
-            - Readability: How readable is the answer, does it have redundant information or incomplete information that hurts the readability of the answer.
-            - Score 0: the answer is completely unreadable, e.g. full of symbols that's hard to read; e.g. keeps repeating the words that it's very hard to understand the meaning of the paragraph. No meaningful information can be extracted from the answer.
-            - Score 1: the answer is slightly readable, there are irrelevant symbols or repeated words, but it can roughly form a meaningful sentence that covers some aspects of the answer.
-                - Example:
-                    - Question: How to use databricks API to create a cluster?
-                    - Answer: You you  you  you  you  you  will need a Databricks access token with the appropriate permissions. And then then you'll need to set up the request URL, then you can make the HTTP Request. Then Then Then Then Then Then Then Then Then
-            - Score 2: the answer is correct and mostly readable, but there is one obvious piece that's affecting the readability (mentioning of irrelevant pieces, repeated words)
-                - Example:
-                    - Question: How to terminate a databricks cluster
-                    - Answer: In the Databricks workspace, navigate to the "Clusters" tab.
-                    Find the cluster you want to terminate from the list of active clusters.
-                    Click on the down-arrow next to the cluster name to open the cluster details.
-                    Click on the "Terminate" button…………………………………..
-                    A confirmation dialog will appear. Click "Terminate" again to confirm the action.
-            - Score 3: the answer is correct and reader friendly, no obvious piece that affect readability.          
-            The format in which you should provide results-
-                Correctness:
-                    -Score
-                    -Explanation of score
-                Readability:
-                    -Score
-                    -Explanation of score
-                Comprehensiveness:
-                    -Score
-                    -Explanation of score
+    user_context = "".join(context)
+    rubric_content = f"""
+        ## Context:
+        Ensure that you grade according to the following context:
+
+        **[CONTEXT START]**
+        {context}
+        **[CONTEXT END]**
+
+        ## Instructions for Evaluation
+
+        Please act as an impartial judge and evaluate the quality of the provided answer which attempts to address the given question based on the provided context. You will be given context, a question, and an answer to submit your reasoning and score for the correctness, comprehensiveness, and readability of the answer.
+
+        ### Task
+
+        Evaluate the provided answer according to the criteria below and provide scores along with explanations for each category: Correctness, Comprehensiveness, and Readability.
+
+        ### Grading Rubric
+
+        #### Correctness
+
+        Evaluate whether the answer correctly addresses the question.
+
+        - **Score 0**: The answer is completely incorrect, irrelevant, or an empty string.
+        - **Example**:
+            - **Question**: How to terminate a Databricks cluster?
+            - **Answer**: Sorry, I don't know the answer.
+
+        - **Score 1**: The answer provides some relevance to the question but only partially addresses it.
+        - **Example**:
+            - **Question**: How to terminate a Databricks cluster?
+            - **Answer**: Databricks cluster is a cloud-based computing environment.
+
+        - **Score 2**: The answer mostly addresses the question but misses or hallucinates on a critical aspect.
+        - **Example**:
+            - **Question**: How to terminate a Databricks cluster?
+            - **Answer**: Navigate to the "Clusters" tab and find the cluster you want to terminate. Then you'll find a button to terminate all clusters at once.
+
+        - **Score 3**: The answer correctly and completely addresses the question.
+        - **Example**:
+            - **Question**: How to terminate a Databricks cluster?
+            - **Answer**: In the Databricks workspace, navigate to the "Clusters" tab. Find the cluster you want to terminate from the list of active clusters. Click on the down-arrow next to the cluster name to open the cluster details. Click on the "Terminate" button and confirm the action.
+
+        #### Comprehensiveness
+
+        Evaluate how thoroughly the answer addresses all aspects of the question.
+
+        - **Score 0**: The answer is completely incorrect.
+
+        - **Score 1**: The answer is correct but too brief to fully answer the question.
+        - **Example**:
+            - **Question**: How to use Databricks API to create a cluster?
+            - **Answer**: You will need a Databricks access token.
+
+        - **Score 2**: The answer is correct and addresses the main aspects but lacks details.
+        - **Example**:
+            - **Question**: How to use Databricks API to create a cluster?
+            - **Answer**: You will need a Databricks access token. Set up the request URL and make the HTTP request.
+
+        - **Score 3**: The answer is correct and fully addresses all aspects of the question.
+
+        #### Readability
+
+        Evaluate the readability of the answer.
+
+        - **Score 0**: The answer is completely unreadable.
+
+        - **Score 1**: The answer is slightly readable with irrelevant symbols or repeated words.
+        - **Example**:
+            - **Question**: How to use Databricks API to create a cluster?
+            - **Answer**: You you you will need a Databricks access token. Then you can make the HTTP request.
+
+        - **Score 2**: The answer is correct and mostly readable but contains minor readability issues.
+        - **Example**:
+            - **Question**: How to terminate a Databricks cluster?
+            - **Answer**: Navigate to the "Clusters" tab. Find the cluster you want to terminate. Click on the down-arrow. Click the "Terminate" button. Click "Terminate" again to confirm.
+
+        - **Score 3**: The answer is correct and fully readable without any issues.
+
+        ### Format for Results
+
+        Provide your evaluation in the following format:
+
+        - **Correctness**:
+        - Score
+        - Explanation of score
+
+        - **Readability**:
+        - Score
+        - Explanation of score
+
+        - **Comprehensiveness**:
+        - Score
+        - Explanation of score
                             """
     payload = {
         "messages": [
@@ -669,7 +701,6 @@ async def instructor_eval(instructor_name, context, score_criterion, explanation
     score_value = None
     # Evaluation prompt template
     evaluate_instructions = f"""
-        [INST]
         -Instructions:
             You are tasked with evaluating a teacher's performance based on the criterion: {score_criterion} - {explanation}.
 
@@ -686,7 +717,6 @@ async def instructor_eval(instructor_name, context, score_criterion, explanation
             Rate strictly on a scale of 1 to 5 using whole numbers only.
 
             Ensure the examples are directly relevant to the evaluation criterion and discard any irrelevant excerpts.
-        [/INST]
     """
 
     output_format = f"""Strictly follow the output format-
@@ -702,7 +732,7 @@ async def instructor_eval(instructor_name, context, score_criterion, explanation
             -Include both positive and negative instances.
             -Highlight poor examples if the score is not ideal."""
     
-    system_message = """This is a chat between a user and a judge. The judge gives helpful, detailed, and polite suggestions for improvement for a particular teacher from the given context - the context contains transcripts of videos. The assistant should also indicate when the judgement be found in the context."""
+    system_message = """You are a judge. The judge gives helpful, detailed, and polite suggestions for improvement for a particular teacher from the given context - the context contains transcripts of videos. The judge should also indicate when the judgement be found in the context."""
     
     formatted_transcripts = f"""Here are given transcripts for {instructor_name}-   
                     [TRANSCRIPT START]
@@ -780,34 +810,47 @@ async def answer_gen(question, context):
     user_context = "".join(context)
     # One shot example given in answer_inst should be the original question + original answer.
     answer_inst = f"""
-        [INST]
+        ### Context:
+        Ensure that each generated answer is relevant to the following context:
+
+        **[CONTEXT START]**
+        {context}
+        **[CONTEXT END]**
+
+        ## Answer Instructions
+
         You are a highly knowledgeable and detailed assistant. Please follow these guidelines when generating answers:
-        
-        1. **Format**: Ensure the answer is nicely formatted and visually appealing. Use bullet points, numbered lists, headings, and subheadings where appropriate.
-        
-        2. **Clarity**: Provide clear and concise explanations. Avoid jargon unless it is necessary and explain it when used.
-        
-        3. **Math Questions**: 
+
+        ### 1. Format
+        Ensure the answer is nicely formatted and visually appealing. Use:
+        - Bullet points
+        - Numbered lists
+        - Headings
+        - Subheadings where appropriate
+
+        ### 2. Clarity
+        Provide clear and concise explanations. Avoid jargon unless it is necessary, and explain it when used.
+
+        ### 3. Math Questions
         - Include all steps in the solution process.
-        - Use clear and logical progression from one step to the next.
+        - Use a clear and logical progression from one step to the next.
         - Explain each step briefly to ensure understanding.
         - Use LaTeX formatting for mathematical expressions to ensure they are easy to read and understand.
 
-        4. **Non-Math Questions**:
+        ### 4. Non-Math Questions
         - Provide detailed explanations and context.
         - Break down complex ideas into simpler parts.
         - Use examples where appropriate to illustrate points.
         - Ensure the answer is comprehensive and addresses all parts of the question.
-        
-        5. **Tone**: Maintain a professional and friendly tone. Aim to be helpful and approachable.
-        
+
+        ### 5. Tone
+        Maintain a professional and friendly tone. Aim to be helpful and approachable.
+
+        ### Example
         Here are a couple of examples to illustrate the format:
-        ONE-SHOT-EXAMPLE-GOES-HERE
-        [/INST]
-    """
-    user_prompt = f"""Based on the context : {user_context}, 
+        ONE-SHOT-EXAMPLE-GOES-HERE"""
     
-                    Please answer the following question - {question}"""
+    user_prompt = f"""Please answer the following question - {question}"""
 
     payload = {
         "messages": [
@@ -822,9 +865,9 @@ async def answer_gen(question, context):
         ],
         "stream": False,
         "options": {
-            "top_k": 1,
-            "top_p": 1,
-            "temperature": 0,
+            "top_k": 20,
+            "top_p": 0.5,
+            "temperature": 0.5,
             "seed": 100
         }
     }
@@ -855,79 +898,81 @@ async def generate_question_variants(base_question, n, context):
     user_context = "".join(context)
 
     base_question_gen = f"""
-[INST]
-As an inventive educator dedicated to nurturing critical thinking skills, your task is to devise a series of distinct iterations of a mathematical or textual problem. Each iteration should be rooted in a fundamental problem-solving technique but feature diverse numerical parameters and creatively reworded text to discourage students from sharing answers. Your objective is to generate a collection of unique questions that not only promote critical thinking but also thwart easy duplication of solutions. Ensure that each variant presents different numerical values, yielding disparate outcomes. Each question should have its noun labels changed. Additionally, each question should stand alone without requiring reference to any other question, although they may share the same solving concept. Your ultimate aim is to fashion an innovative array of challenges that captivate students and inspire analytical engagement.
+        **Task: Develop Distinct Numerical and Theoretical Question Variants**
 
-Strictly ensure that the questions are relevant to the following context:
+        ### Context:
+        Ensure that each question is relevant to the following context:
 
-    [CONTEXT START]
-{context}
-    [CONTEXT END]
+        **[CONTEXT START]**
+        {context}
+        **[CONTEXT END]**
 
-Example 1:
-Original Question: What are the implications of Kant's categorical imperative on modern ethical theory?
+        As a creative educator, your responsibility is to generate a series of unique variations of a mathematical or theoretical question. Each variation must differ both numerically and theoretically, ensuring a broad range of questions that require different analytical approaches.
 
-Generated Question Variants:
+        ### Objectives:
+        - **Numerical and Theoretical Variations**: Modify numerical values, formulas, conditions, sequences, and theoretical concepts to create diverse challenges.
+        - **Comprehensive Understanding**: Ensure that each variant promotes independent problem-solving and encourages critical thinking.
+        - **Structural Integrity**: Maintain the structural integrity of the original question, especially for multi-part questions, by creating variants with corresponding multi-part sections.
 
-1: How does Kant's categorical imperative shape contemporary discussions in normative ethics?
-2: In what ways does Kant's notion of the categorical imperative influence current ethical frameworks?
-3: Can Kant's categorical imperative be reconciled with utilitarian principles in modern ethical debates?
-4: How do modern deontologists interpret Kant's categorical imperative in the context of bioethics?
-5: What are the contemporary criticisms of applying Kant's categorical imperative to global justice issues?
-6: How does Kant's categorical imperative inform the ethical considerations in artificial intelligence development?
+        ### Instructions:
 
-These are advanced discussion prompts for graduate-level philosophy seminars.
+        1. **Alter Values**: Change the numerical values in the problem statement. Consider varying parameters such as initial conditions, coefficients, dimensions, or time intervals to offer new challenges.
+        2. **Introduce New Variables**: Add or replace variables to change the mathematical relationships. For instance, adjust the number of terms in a sequence, the coefficients in an equation, or the dimensions in a geometry problem.
+        3. **Modify Conditions**: Alter conditions, such as changing from a linear to a quadratic equation or from a direct proportion to an inverse proportion. Consider introducing new constraints that require different analytical approaches.
+        4. **Change Sequences**: Modify the sequence or order of elements within a question. This can include altering arithmetic, geometric, or other numerical sequences to introduce variety and complexity. Ensure that each sequence presents a unique problem-solving scenario.
+        5. **Explore Real-World Contexts**: Frame the questions in real-world scenarios, such as finance, physics, or engineering, to add practical significance and context.
+        6. **Rephrase the Question**: Change the wording to focus on different theoretical aspects of the topic. Emphasize various perspectives, viewpoints, or implications.
+        7. **Vary the Focus**: Shift the emphasis from one aspect of the problem to another. For instance, from causes to effects, from advantages to disadvantages, or from theoretical analysis to practical applications.
+        8. **Integrate Multiple Concepts**: Combine different theoretical ideas to create complex questions that require understanding multiple concepts. Encourage connections between topics and interdisciplinary thinking.
+        9. **Incorporate Current Trends**: Include recent developments, research, or trends related to the topic to make the question more relevant and engaging.
 
-Example 2:
-Original Question: What is the molarity of a solution containing 5 moles of solute in 2 liters of solution?
+        ### Multi-Part Questions:
 
-Generated Question Variants:
+        1. **Maintain Structural Integrity**: Ensure that each multi-part original question has corresponding multi-part variants. The variants should reflect the same structure and format as the original, maintaining the number of parts and their relationships.
+        2. **Vary Elements**: Introduce changes in each part by varying numerical values, theoretical focus, or conditions. Ensure each section of the variant provides a new and unique challenge.
+        3. **Add Layers of Complexity**: Consider adding additional sub-parts or interrelated components to enhance the complexity and depth of the questions.
+        4. **Promote Comprehensive Understanding**: Ensure that each part requires students to explore different facets of the problem, applying a range of techniques, concepts, or perspectives.
 
-1: What is the molarity of a solution containing 3 moles of solute in 1.5 liters of solution?
-2: Calculate the molarity of a solution with 8 moles of solute in 4 liters of solution.
-3: If a solution contains 6 moles of solute in 3 liters of solution, what is its molarity?
-4: Determine the molarity of a solution with 2 moles of solute in 0.5 liters of solution.
-5: What is the molarity of a solution with 7 moles of solute in 2.5 liters of solution?
-6: Calculate the molarity of a solution containing 4 moles of solute in 1 liter of solution.
+        ### Challenge Level:
 
-These are specialized numerical questions for advanced chemistry courses.
+        1. **Self-Contained Questions**: Ensure each question stands alone with sufficient complexity to discourage direct copying of answers. Avoid reliance on other questions for context.
+        2. **Promote Critical Thinking**: Encourage questions that require analysis, synthesis, and evaluation rather than rote memorization or simple calculations.
+        3. **Foster Analytical Skills**: Aim for questions that inspire analytical engagement, pushing students to explore various solutions and approaches.
 
-Example 3:
-Original Question: Calculate the sequence of prime numbers up to 50. Show the order of the prime numbers in the sequence - 2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47.
+        ### Key Points to Remember:
+        - **Numerical and Theoretical Differences**: Ensure each question differs significantly in both numbers and theoretical focus, challenging students with varied problem-solving approaches.
+        - **Independent Questions**: Each question must be self-contained, without relying on other questions for context.
+        - **Complexity and Variety**: Introduce complexity and variety to challenge critical thinking and analytical skills.
+        - **Structural Consistency in Multi-Part Questions**: Maintain structural integrity by creating multi-part variants for multi-part original questions, ensuring each part is uniquely tailored yet consistent with the original format.
 
-Generated Question Variants:
+        ### Output Format
 
-1: Determine the sequence of Fibonacci numbers up to the 10th term. Show the order of the Fibonacci numbers in the sequence - 0, 1, 1, 2, 3, 5, 8, 13, 21, 34.
-2: Identify the sequence of even numbers from 2 to 20. Show the order of the even numbers in the sequence - 2, 4, 6, 8, 10, 12, 14, 16, 18, 20.
-3: Calculate the sequence of squares of the first 10 natural numbers. Show the order of the squares in the sequence - 1, 4, 9, 16, 25, 36, 49, 64, 81, 100.
-4: Determine the sequence of powers of 2 up to 2^10. Show the order of the powers of 2 in the sequence - 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024.
-5: Identify the sequence of triangular numbers up to the 10th term. Show the order of the triangular numbers in the sequence - 1, 3, 6, 10, 15, 21, 28, 36, 45, 55.
+        #### Single-Part Questions:
 
-These are advanced pseudo-code problems for computer science students focusing on streaming algorithms.
+        1. **Original Question**: original_question
+        2. **Variant 1**: variant_1
+        3. **Variant 2**: variant_2
+        4. **Variant 3**: variant_3
+        5. **Variant 4**: variant_4
+        6. **Variant 5**: variant_5
 
-Example 4:
-Original Question: Utilizing an initial score of 5 and a multiplier of 0.2, determine which product is the most popular based on this sequence of ratings: A, B, A, C, B, A, C, B, A, B?
+        #### Multi-Part Questions:
 
-Generated Question Variants:
+        1. **Original Question**: 
+        - Part A: original_question_part_a
+        - Part B: original_question_part_b
+        - Part C: original_question_part_c
+        2. **Variant 1**: 
+        - Part A: variant_1_part_a
+        - Part B: variant_1_part_b
+        - Part C: variant_1_part_c
+        3. **Variant 2**: 
+        - Part A: variant_2_part_a
+        - Part B: variant_2_part_b
+        - Part C: variant_2_part_c
 
-1: Given an initial score of 3 and a multiplier of 0.1, identify which app is the most downloaded based on this sequence of reviews: X, Y, Z, X, X, Y, Z, X, Y, Z?
-2: With an initial score of 4 and a multiplier of 0.15, determine which book is the most read based on this series of mentions: Book1, Book2, Book1, Book3, Book2, Book1, Book3, Book2, Book1, Book3?
-3: Using an initial score of 2 and a multiplier of 0.05, find which movie is the highest rated based on the following set of ratings: MovieA, MovieB, MovieA, MovieC, MovieB, MovieA, MovieC, MovieB, MovieA, MovieB?
-4: With an initial score of 6 and a multiplier of 0.25, calculate which song is the most popular based on this stream of plays: SongX, SongY, SongX, SongZ, SongY, SongX, SongZ, SongY, SongX, SongZ?
-5: Given an initial score of 4.5 and a multiplier of 0.3, determine which TV show is the most watched based on the following sequence of episodes: Show1, Show2, Show1, Show3, Show2, Show1, Show3, Show2, Show1, Show3?
-
-Explanation: No two variants must be dependent on each other; each variant needs to be a standalone question that can be answered independently. Notice how the numerical values change; it is crucial for the numerical values to change. If there is a sequence, it must change as well. The generated questions are similar to the originals but rephrased using different wording or focusing on a different aspect of the problem (area vs. perimeter, speed vs. time). Also make sure if there are subquestions in the context there should be similar subquestions in the generated questions. If any are present in the same format as the question presented. Also if a question has multiple sub questions make sure you also have multiple sub questions in the generated questions.
-
-Strictly follow the format for your responses:
-generated_question_variants:
-1: Variant 1
-2: Variant 2
-3: Variant 3
-..
-..
-n: Variant n
-[/INST]
-"""
+        Utilize these guidelines to generate distinct and engaging questions based on the given context.
+    """
 
 
     # Define the payload for Ollama
@@ -944,15 +989,15 @@ n: Variant n
         ],
         "stream": False,
         "options": {
-            "top_k": 1, 
-            "top_p": 1, 
-            "temperature": 0, 
-            "seed": 100, 
+            "top_k": 20, 
+            "top_p": 0.5, 
+            "temperature": 0.5, 
+            # "seed": 100, 
         }
     }
     print("Original question" + base_question)
     # Asynchronous call to Ollama API
-    response = await asyncio.to_thread(ollama.chat, model='dolphin-llama3', messages=payload['messages'], stream=payload['stream'])
+    response = await asyncio.to_thread(ollama.chat, model='llama3.1', messages=payload['messages'], stream=payload['stream'])
     content = response['message']['content']
     print("Response-" + content)
     variants_dict = extract_variants(base_question, content)
@@ -961,19 +1006,19 @@ n: Variant n
 
 
 def extract_variants(base_question, content):
-    main_question_pattern = re.compile(r'^\d+\.\s.+', re.MULTILINE)
-    sub_question_pattern = re.compile(r'^[a-z]+\.\s.+|^[ivxlc]+\.\s.+', re.MULTILINE)
+    main_question_pattern = re.compile(r'^\d+\.\s.*?(?=\n\d+\.)', re.DOTALL | re.MULTILINE)
+    sub_question_pattern = re.compile(r'^[a-z]+\.\s.*?(?=\n[a-z]+\.)|^[ivxlc]+\.\s.*?(?=\n[ivxlc]+\.|^\d+\.)', re.DOTALL | re.MULTILINE)
     
     questions = []
     main_questions = main_question_pattern.findall(content)
     
     for main_question in main_questions:
-        sub_questions = sub_question_pattern.findall(content, content.index(main_question))
+        sub_questions = sub_question_pattern.findall(main_question)
         formatted_question = main_question.strip()
         
         if sub_questions:
-            formatted_sub_questions = "/n".join([f"{sq[0]}){sq[2:]}" for sq in sub_questions])
-            formatted_question = f"{main_question.strip()}/n{formatted_sub_questions}"
+            formatted_sub_questions = "\n".join([f"{sq[0]}) {sq[2:]}" for sq in sub_questions])
+            formatted_question = f"{main_question.strip()}\n{formatted_sub_questions}"
         
         questions.append({"main_question": formatted_question})
     

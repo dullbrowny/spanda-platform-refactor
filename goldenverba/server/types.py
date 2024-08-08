@@ -4,7 +4,7 @@ from goldenverba.components.types import FileData
 
 class QueryPayload(BaseModel):
     query: str
-
+    course_id: str = None  # Add course_id as an optional parameter
 
 class ConversationItem(BaseModel):
     type: str
