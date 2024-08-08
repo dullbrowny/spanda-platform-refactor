@@ -134,14 +134,20 @@ async def serve_frontend():
 ### GET
 
 # Define health check endpoint
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 @app.get("/api/health")
 async def health_check():
     try:
+        logger.info("Health check initiated.")
         if manager.client.is_ready():
+            logger.info("Database is ready.")
             return JSONResponse(
                 content={"message": "Alive!", "production": production, "gtag": tag}
             )
         else:
+            logger.warning("Database not ready.")
             return JSONResponse(
                 content={
                     "message": "Database not ready!",
@@ -151,7 +157,7 @@ async def health_check():
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
     except Exception as e:
-        msg.fail(f"Healthcheck failed with {str(e)}")
+        logger.error(f"Healthcheck failed with {str(e)}")
         return JSONResponse(
             content={
                 "message": f"Healthcheck failed with {str(e)}",
