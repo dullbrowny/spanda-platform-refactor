@@ -1736,19 +1736,6 @@ async def import_transcript(transcript_data: UploadFile = File(...)):
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
-class FileData(BaseModel):
-    filename: str
-    extension: str
-    content: str
-
-class ImportPayload(BaseModel):
-    data: list[FileData]
-    textValues: list
-    config: dict
-
-class QueryRequest(BaseModel):
-    query: str
-
 
 @app.post("/api/upload_transcript")
 async def upload_transcript(payload: ImportPayload):
