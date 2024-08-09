@@ -944,24 +944,25 @@ async def generate_question_variants(base_question, n, context):
         - **Independent Questions**: Each question must be self-contained, without relying on other questions for context.
         - **Complexity and Variety**: Introduce complexity and variety to challenge critical thinking and analytical skills.
         - **Structural Consistency in Multi-Part Questions**: Maintain structural integrity by creating multi-part variants for multi-part original questions, ensuring each part is uniquely tailored yet consistent with the original format.
+        - **DO NOT GENERATE ANSWERS**
 
-        ### Output Format
+        ### Output Format - Strictly follow the output format
 
         #### Single-Part Questions:
 
-        1. Variant 1: variant_1
-        2. Variant 2: variant_2
-        3. Variant 3: variant_3
-        4. Variant 4: variant_4
-        5. Variant 5: variant_5
+        **Variant 1**: variant_1
+        **Variant 2**: variant_2
+        **Variant 3**: variant_3
+        **Variant 4**: variant_4
+        **Variant 5**: variant_5
 
         #### Multi-Part Questions:
 
-        1. Variant 1: 
+        **Variant 1**: 
           a. variant_1_part_a
           b. variant_1_part_b
           c. variant_1_part_c
-        2. Variant 2: 
+        **Variant 2**: 
           a. variant_2_part_a
           b. variant_2_part_b
           c. variant_2_part_c
