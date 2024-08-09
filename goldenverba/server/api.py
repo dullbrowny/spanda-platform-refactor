@@ -1001,23 +1001,26 @@ async def generate_question_variants(base_question, n, context):
 
 
 def extract_variants(base_question, content):
-    main_question_pattern = re.compile(r'^\d+\.\s.*?(?=\n\d+\.)', re.DOTALL | re.MULTILINE)
-    sub_question_pattern = re.compile(r'^[a-z]+\.\s.*?(?=\n[a-z]+\.)|^[ivxlc]+\.\s.*?(?=\n[ivxlc]+\.|^\d+\.)', re.DOTALL | re.MULTILINE)
     
-    questions = []
-    main_questions = main_question_pattern.findall(content)
+    variant_pattern = re.compile(r'(\*\*Variant \d+:\*\*.*?)(?=\*\*Variant \d+:|\Z)', re.DOTALL)
     
-    for main_question in main_questions:
-        sub_questions = sub_question_pattern.findall(main_question)
-        formatted_question = main_question.strip()
-        
-        if sub_questions:
-            formatted_sub_questions = "\n".join([f"{sq[0]}) {sq[2:]}" for sq in sub_questions])
-            formatted_question = f"{main_question.strip()}\n{formatted_sub_questions}"
-        
-        questions.append({"main_question": formatted_question})
+    # Find all variants
+    variants = variant_pattern.findall(content)
     
-    return {base_question: questions}
+    # Debug: print found variants
+    # print("Found variants:")
+    # print(variants)
+    
+    variant_contents = []
+    
+    for variant in variants:
+        # Remove the variant title and keep only the content
+        content_without_title = variant.split('\n', 1)[1].strip()  # Remove the first line (variant title)
+        variant_contents.append(content_without_title)  # Store the content in the list
+    
+    # print  (variant_contents)
+
+    return {base_question: variant_contents}
 
 
 @app.post("/api/assignments")
