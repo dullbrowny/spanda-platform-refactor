@@ -691,14 +691,16 @@ async def grading_assistant(question_answer_pair, context):
 
 
 async def instructor_eval(instructor_name, context, score_criterion, explanation):
+    # Ensure score_criterion is hashable by converting it to a string if necessary
+    score_criterion = str(score_criterion)
+
     # Define the criterion to evaluate
     user_context = "".join(context)
-    # print(user_context)
+
     # Initialize empty dictionaries to store relevant responses and scores
     responses = {}
     scores_dict = {}
-    # Initialize score_value with a default value
-    score_value = None
+
     # Evaluation prompt template
     evaluate_instructions = f"""
         -Instructions:
@@ -732,9 +734,9 @@ async def instructor_eval(instructor_name, context, score_criterion, explanation
             -Include both positive and negative instances.
             -Highlight poor examples if the score is not ideal."""
     
-    system_message = """You are a judge. The judge gives helpful, detailed, and polite suggestions for improvement for a particular teacher from the given context - the context contains transcripts of videos. The judge should also indicate when the judgement be found in the context."""
+    system_message = """You are a judge. The judge gives helpful, detailed, and polite suggestions for improvement for a particular teacher from the given context - the context contains transcripts of videos. The judge should also indicate when the judgment can be found in the context."""
     
-    formatted_transcripts = f"""Here are given transcripts for {instructor_name}-   
+    formatted_transcripts = f"""Here are the transcripts for {instructor_name}-   
                     [TRANSCRIPT START]
                     {user_context}
                     [TRANSCRIPT END]"""
@@ -758,12 +760,7 @@ async def instructor_eval(instructor_name, context, score_criterion, explanation
             "top_k": 1, 
             "top_p": 1, 
             "temperature": 0, 
-            "seed": 100, 
-            # "num_ctx": 10000
-            # "num_predict": 100,  # Reduced for shorter outputs
-            # "repeat_penalty": 1.2,  # Adjusted to reduce repetition
-            # "presence_penalty": 1.5, # Adjusted to discourage repeated concepts
-            # "frequency_penalty": 1.0 # Adjusted to reduce frequency of repeated tokens
+            "seed": 100
         }
     }
 
@@ -771,39 +768,22 @@ async def instructor_eval(instructor_name, context, score_criterion, explanation
     response = await asyncio.to_thread(ollama.chat, model='llama3.1', messages=payload['messages'], stream=payload['stream'])
 
     # Store the response
-    responses[score_criterion] = response
-
-    # Extract the score from the response content
     content = response['message']['content']
 
-    # Adjust the regular expression to handle various cases including 'Score:', direct number, asterisks, and new lines
+    # Extract the score from the response content
     pattern = rf'(?i)(score:\s*(\d+)|\**{re.escape(score_criterion)}\**\s*[:\-]?\s*(\d+))'
-
     match = re.search(pattern, content, re.IGNORECASE)
 
     if match:
         # Check which group matched and extract the score
-        if match.group(2):  # This means 'Score:' pattern matched
-            score_value = match.group(2).strip()  # group(2) contains the number after 'Score:'
-        elif match.group(3):  # This means direct number pattern matched
-            score_value = match.group(3).strip()  # group(3) contains the number directly after score criterion
-        else:
-            score_value = "N/A"  # Fallback in case groups are not as expected
+        score_value = match.group(2).strip() if match.group(2) else match.group(3).strip()
         scores_dict[score_criterion] = score_value
     else:
         scores_dict[score_criterion] = "N/A"
-        
-    # If the score is still "N/A", check explicitly for the `**` case
-    if score_value == "N/A":
-        pattern_strict = rf'\*\*{re.escape(score_criterion)}\*\*\s*[:\-]?\s*(\d+)'
-        match_strict = re.search(pattern_strict, content)
-        if match_strict:
-            score_value = match_strict.group(1).strip()
-        else:
-            score_value = "N/A"
 
-    # Return the responses dictionary and scores dictionary
-    return responses, scores_dict
+    # Return only the relevant content without any metadata
+    return {"content": content}, scores_dict
+
 
 # Function to generate answer using the Ollama API
 async def answer_gen(question, context):
@@ -1683,42 +1663,45 @@ async def ollama_afe(request: QueryRequest):
     }
 
     instructor_name = request.query
-
+    dimension_scores = {}
     all_responses = {}
-    all_scores = {}
 
-    for master_trait, explanation in dimensions.items():
-        for sub_trait, details in explanation["sub-dimensions"].items():
-            query = f"Judge {instructor_name} based on {sub_trait} under {master_trait}."
-            context = await make_request(query)  # Assuming make_request is defined elsewhere to get the context
+    for dimension, dimension_data in dimensions.items():
+        sub_dimensions = dimension_data["sub-dimensions"]
+        total_sub_weight = sum([sub_data["weight"] for sub_data in sub_dimensions.values()])
+        weighted_sub_scores = 0
+        
+        all_responses[dimension] = {}
 
-            combined_explanation = f"Definition: {details['definition']}\n"
-            combined_explanation += f"Example: {details['example']}\n"
-            combined_explanation += "Criteria:\n"
-            for score, criteria in details["criteria"].items():
-                combined_explanation += f"{score}: {criteria}\n"
+        for sub_dim_name, sub_dim_data in sub_dimensions.items():
+            query = f"""
+            Evaluate the {sub_dim_name.lower()} of the instructor "{instructor_name}" based on the following criteria:
+            Definition: {sub_dim_data['definition']}
+            Example: {sub_dim_data['example']}
+            Criteria:
+            {json.dumps(sub_dim_data['criteria'], indent=4)}
+            Provide a score between 1 and 5 based on the criteria.
+            """
 
-            result_responses, result_scores = await instructor_eval(instructor_name, context, sub_trait, combined_explanation)
-            
-            if master_trait not in all_responses:
-                all_responses[master_trait] = {}
-                all_scores[master_trait] = {}
+            # Assuming make_request returns the context required for evaluation
+            context = await make_request(instructor_name)
+            response, score_dict = await instructor_eval(instructor_name, context, sub_dim_name, sub_dim_data["criteria"])
 
-            # Store the response and score for each sub_trait under its master_trait
-            all_responses[master_trait][sub_trait] = result_responses[sub_trait]['message']['content']
-            all_scores[master_trait][sub_trait] = result_scores[sub_trait]
+            # Store the response and score
+            all_responses[dimension][sub_dim_name] = f"{sub_dim_name}: {score_dict.get(sub_dim_name, 'N/A')} - Detailed Explanation with Examples and justification for examples.\n\n{response}"
+            score_str = score_dict.get(sub_dim_name, "0")
+            score = int(score_str) if score_str.isdigit() else 0
+            normalized_score = (score / 5) * sub_dim_data["weight"]
+            weighted_sub_scores += normalized_score
 
-    response = {
-        "DOCUMENT": all_responses,
-        "SCORES": all_scores
+        # Calculate the weighted average for this dimension
+        dimension_score = (weighted_sub_scores / total_sub_weight) * dimension_data["weight"]
+        dimension_scores[dimension] = dimension_score
+
+    return {
+        "dimension_scores": dimension_scores,
+        "DOCUMENT": all_responses
     }
-    
-
-    return response
-
-
-
-
 # Modified import endpoint to handle transcript uploads
 @app.post("/api/importTranscript")
 async def import_transcript(transcript_data: UploadFile = File(...)):
