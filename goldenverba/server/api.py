@@ -558,100 +558,77 @@ async def make_request(query_user):
 
 async def grading_assistant(question_answer_pair, context):
     user_context = "".join(context)
-    rubric_content = f"""
-        ## Context:
-        Ensure that you grade according to the following context:
+    rubric_content = f"""Please act as an impartial judge and evaluate the quality of the provided answer which attempts to answer the provided question based on a provided context.
+            You'll be given context, question and answer to submit your reasoning and score for the correctness, comprehensiveness and readability of the answer. 
 
-        **[CONTEXT START]**
-        {context}
-        **[CONTEXT END]**
+            Here is the context - 
+            [CONTEXT START]
+            {user_context}. 
+            [CONTEXT START]
 
-        ## Instructions for Evaluation
-
-        Please act as an impartial judge and evaluate the quality of the provided answer which attempts to address the given question based on the provided context. You will be given context, a question, and an answer to submit your reasoning and score for the correctness, comprehensiveness, and readability of the answer.
-
-        ### Task
-
-        Evaluate the provided answer according to the criteria below and provide scores along with explanations for each category: Correctness, Comprehensiveness, and Readability.
-
-        ### Grading Rubric
-
-        #### Correctness
-
-        Evaluate whether the answer correctly addresses the question.
-
-        - **Score 0**: The answer is completely incorrect, irrelevant, or an empty string.
-        - **Example**:
-            - **Question**: How to terminate a Databricks cluster?
-            - **Answer**: Sorry, I don't know the answer.
-
-        - **Score 1**: The answer provides some relevance to the question but only partially addresses it.
-        - **Example**:
-            - **Question**: How to terminate a Databricks cluster?
-            - **Answer**: Databricks cluster is a cloud-based computing environment.
-
-        - **Score 2**: The answer mostly addresses the question but misses or hallucinates on a critical aspect.
-        - **Example**:
-            - **Question**: How to terminate a Databricks cluster?
-            - **Answer**: Navigate to the "Clusters" tab and find the cluster you want to terminate. Then you'll find a button to terminate all clusters at once.
-
-        - **Score 3**: The answer correctly and completely addresses the question.
-        - **Example**:
-            - **Question**: How to terminate a Databricks cluster?
-            - **Answer**: In the Databricks workspace, navigate to the "Clusters" tab. Find the cluster you want to terminate from the list of active clusters. Click on the down-arrow next to the cluster name to open the cluster details. Click on the "Terminate" button and confirm the action.
-
-        #### Comprehensiveness
-
-        Evaluate how thoroughly the answer addresses all aspects of the question.
-
-        - **Score 0**: The answer is completely incorrect.
-
-        - **Score 1**: The answer is correct but too brief to fully answer the question.
-        - **Example**:
-            - **Question**: How to use Databricks API to create a cluster?
-            - **Answer**: You will need a Databricks access token.
-
-        - **Score 2**: The answer is correct and addresses the main aspects but lacks details.
-        - **Example**:
-            - **Question**: How to use Databricks API to create a cluster?
-            - **Answer**: You will need a Databricks access token. Set up the request URL and make the HTTP request.
-
-        - **Score 3**: The answer is correct and fully addresses all aspects of the question.
-
-        #### Readability
-
-        Evaluate the readability of the answer.
-
-        - **Score 0**: The answer is completely unreadable.
-
-        - **Score 1**: The answer is slightly readable with irrelevant symbols or repeated words.
-        - **Example**:
-            - **Question**: How to use Databricks API to create a cluster?
-            - **Answer**: You you you will need a Databricks access token. Then you can make the HTTP request.
-
-        - **Score 2**: The answer is correct and mostly readable but contains minor readability issues.
-        - **Example**:
-            - **Question**: How to terminate a Databricks cluster?
-            - **Answer**: Navigate to the "Clusters" tab. Find the cluster you want to terminate. Click on the down-arrow. Click the "Terminate" button. Click "Terminate" again to confirm.
-
-        - **Score 3**: The answer is correct and fully readable without any issues.
-
-        ### Format for Results
-
-        Provide your evaluation in the following format:
-
-        - **Correctness**:
-        - Score
-        - Explanation of score
-
-        - **Readability**:
-        - Score
-        - Explanation of score
-
-        - **Comprehensiveness**:
-        - Score
-        - Explanation of score
+            Below is your grading rubric: 
+            - Correctness: If the answer correctly answers the question, below are the details for different scores:
+            - Score 0: the answer is completely incorrect, doesn't mention anything about the question or is completely contrary to the correct answer.
+                - For example, when asked “How to terminate a databricks cluster”, the answer is an empty string, or content that's completely irrelevant, or sorry I don't know the answer.
+            - Score 1: the answer provides some relevance to the question and answers one aspect of the question correctly.
+                - Example:
+                    - Question: How to terminate a databricks cluster
+                    - Answer: Databricks cluster is a cloud-based computing environment that allows users to process big data and run distributed data processing tasks efficiently.
+                    - Or answer:  In the Databricks workspace, navigate to the "Clusters" tab. And then this is a hard question that I need to think more about it
+            - Score 2: the answer mostly answers the question but is missing or hallucinating on one critical aspect.
+                - Example:
+                    - Question: How to terminate a databricks cluster”
+                    - Answer: “In the Databricks workspace, navigate to the "Clusters" tab.
+                    Find the cluster you want to terminate from the list of active clusters.
+                    And then you'll find a button to terminate all clusters at once”
+            - Score 3: the answer correctly answers the question and is not missing any major aspect. In this case, to score correctness 3, the final answer must be correct, final solution for numerical problems is of utmost importance.
+                - Example:
+                    - Question: How to terminate a databricks cluster
+                    - Answer: In the Databricks workspace, navigate to the "Clusters" tab.
+                    Find the cluster you want to terminate from the list of active clusters.
+                    Click on the down-arrow next to the cluster name to open the cluster details.
+                    Click on the "Terminate" button. A confirmation dialog will appear. Click "Terminate" again to confirm the action.”
+            - Comprehensiveness: How comprehensive is the answer, does it fully answer all aspects of the question and provide comprehensive explanation and other necessary information. Below are the details for different scores:
+            - Score 0: typically if the answer is completely incorrect, then the comprehensiveness is also zero.
+            - Score 1: if the answer is correct but too short to fully answer the question, then we can give score 1 for comprehensiveness.
+                - Example:
+                    - Question: How to use databricks API to create a cluster?
+                    - Answer: First, you will need a Databricks access token with the appropriate permissions. You can generate this token through the Databricks UI under the 'User Settings' option. And then (the rest is missing)
+            - Score 2: the answer is correct and roughly answers the main aspects of the question, but it's missing description about details. Or is completely missing details about one minor aspect.
+                - Example:
+                    - Question: How to use databricks API to create a cluster?
+                    - Answer: You will need a Databricks access token with the appropriate permissions. Then you'll need to set up the request URL, then you can make the HTTP Request. Then you can handle the request response.
+                - Example:
+                    - Question: How to use databricks API to create a cluster?
+                    - Answer: You will need a Databricks access token with the appropriate permissions. Then you'll need to set up the request URL, then you can make the HTTP Request. Then you can handle the request response.
+            - Score 3: the answer is correct, and covers all the main aspects of the question
+            - Readability: How readable is the answer, does it have redundant information or incomplete information that hurts the readability of the answer.
+            - Score 0: the answer is completely unreadable, e.g. full of symbols that's hard to read; e.g. keeps repeating the words that it's very hard to understand the meaning of the paragraph. No meaningful information can be extracted from the answer.
+            - Score 1: the answer is slightly readable, there are irrelevant symbols or repeated words, but it can roughly form a meaningful sentence that covers some aspects of the answer.
+                - Example:
+                    - Question: How to use databricks API to create a cluster?
+                    - Answer: You you  you  you  you  you  will need a Databricks access token with the appropriate permissions. And then then you'll need to set up the request URL, then you can make the HTTP Request. Then Then Then Then Then Then Then Then Then
+            - Score 2: the answer is correct and mostly readable, but there is one obvious piece that's affecting the readability (mentioning of irrelevant pieces, repeated words)
+                - Example:
+                    - Question: How to terminate a databricks cluster
+                    - Answer: In the Databricks workspace, navigate to the "Clusters" tab.
+                    Find the cluster you want to terminate from the list of active clusters.
+                    Click on the down-arrow next to the cluster name to open the cluster details.
+                    Click on the "Terminate" button…………………………………..
+                    A confirmation dialog will appear. Click "Terminate" again to confirm the action.
+            - Score 3: the answer is correct and reader friendly, no obvious piece that affect readability.          
+            The format in which you should provide results-
+                Correctness:
+                    -Score
+                    -Explanation of score
+                Readability:
+                    -Score
+                    -Explanation of score
+                Comprehensiveness:
+                    -Score
+                    -Explanation of score
                             """
+    
     payload = {
         "messages": [
             {"role": "system", "content": rubric_content},
@@ -878,74 +855,96 @@ async def generate_question_variants(base_question, n, context):
     user_context = "".join(context)
 
     base_question_gen = f"""
-        **Task: Develop Distinct Numerical and Theoretical Question Variants**
+        **Task: Design a Variety of Mathematical and Conceptual Problem Scenarios**
 
-        ### Context:
-        Ensure that each question is relevant to the following context:
+        ### Background:
+        You are tasked with creating a set of unique problem scenarios based on the following context:
 
-        **[CONTEXT START]**
-        {context}
+        **[CONTEXT START]**  
+        {context}  
         **[CONTEXT END]**
 
-        As a creative educator, your responsibility is to generate a series of unique variations of a mathematical or theoretical question. Each variation must differ both numerically and theoretically, ensuring a broad range of questions that require different analytical approaches.
+        Your objective is to generate distinct variations of a core problem by creatively altering its numerical, conceptual, and contextual elements. Each scenario should challenge students to apply diverse problem-solving strategies and think critically about the concepts involved.
 
-        ### Objectives:
-        - **Numerical and Theoretical Variations**: Modify numerical values, formulas, conditions, sequences, and theoretical concepts to create diverse challenges.
-        - **Comprehensive Understanding**: Ensure that each variant promotes independent problem-solving and encourages critical thinking.
-        - **Structural Integrity**: Maintain the structural integrity of the original question, especially for multi-part questions, by creating variants with corresponding multi-part sections.
+        ### Creation Guidelines:
 
-        ### Instructions:
+        1. **Diversify Numerical Elements**: Transform the numerical aspects of the problem, such as changing quantities, constants, or measurements. These alterations should introduce new dimensions to the problem, encouraging varied computational approaches.
 
-        1. **Alter Values**: Change the numerical values in the problem statement. Consider varying parameters such as initial conditions, coefficients, dimensions, or time intervals to offer new challenges.
-        2. **Introduce New Variables**: Add or replace variables to change the mathematical relationships. For instance, adjust the number of terms in a sequence, the coefficients in an equation, or the dimensions in a geometry problem.
-        3. **Modify Conditions**: Alter conditions, such as changing from a linear to a quadratic equation or from a direct proportion to an inverse proportion. Consider introducing new constraints that require different analytical approaches.
-        4. **Change Sequences**: Modify the sequence or order of elements within a question. This can include altering arithmetic, geometric, or other numerical sequences to introduce variety and complexity. Ensure that each sequence presents a unique problem-solving scenario.
-        5. **Explore Real-World Contexts**: Frame the questions in real-world scenarios, such as finance, physics, or engineering, to add practical significance and context.
-        6. **Rephrase the Question**: Change the wording to focus on different theoretical aspects of the topic. Emphasize various perspectives, viewpoints, or implications.
-        7. **Vary the Focus**: Shift the emphasis from one aspect of the problem to another. For instance, from causes to effects, from advantages to disadvantages, or from theoretical analysis to practical applications.
-        8. **Integrate Multiple Concepts**: Combine different theoretical ideas to create complex questions that require understanding multiple concepts. Encourage connections between topics and interdisciplinary thinking.
-        9. **Incorporate Current Trends**: Include recent developments, research, or trends related to the topic to make the question more relevant and engaging.
+        2. **Reinvent Problem Conditions**: Adjust or replace conditions within the problem, such as shifting the relationships between variables, altering assumptions, or imposing new constraints. These modifications should lead to different methods of solution and analysis.
 
-        ### Multi-Part Questions:
+        3. **Introduce Novel Variables**: Add, remove, or substitute variables to change the nature of the problem. For example, altering the number of components in a sequence or changing the type of equation can lead to entirely different problem-solving paths.
 
-        1. **Maintain Structural Integrity**: Ensure that each multi-part original question has corresponding multi-part variants. The variants should reflect the same structure and format as the original, maintaining the number of parts and their relationships.
-        2. **Vary Elements**: Introduce changes in each part by varying numerical values, theoretical focus, or conditions. Ensure each section of the variant provides a new and unique challenge.
-        3. **Add Layers of Complexity**: Consider adding additional sub-parts or interrelated components to enhance the complexity and depth of the questions.
-        4. **Promote Comprehensive Understanding**: Ensure that each part requires students to explore different facets of the problem, applying a range of techniques, concepts, or perspectives.
+        4. **Change the Setting or Application**: Place the problem in a new context or application, such as using different real-world scenarios or shifting the problem’s focus to another field (e.g., from physics to economics). This approach helps students see the problem from various perspectives and understand its broader relevance.
 
-        ### Challenge Level:
+        5. **Redesign the Problem Statement**: Reword the problem to emphasize different theoretical aspects, such as shifting focus from procedure to concept or from application to theory. This encourages students to explore different dimensions of the same problem.
 
-        1. **Self-Contained Questions**: Ensure each question stands alone with sufficient complexity to discourage direct copying of answers. Avoid reliance on other questions for context.
-        2. **Promote Critical Thinking**: Encourage questions that require analysis, synthesis, and evaluation rather than rote memorization or simple calculations.
-        3. **Foster Analytical Skills**: Aim for questions that inspire analytical engagement, pushing students to explore various solutions and approaches.
+        6. **Combine or Fragment Concepts**: Either merge multiple concepts into a single complex problem or break down a problem into simpler, interrelated parts. This approach encourages deeper understanding and the ability to connect disparate ideas.
 
-        ### Key Points to Remember:
-        - **Numerical and Theoretical Differences**: Ensure each question differs significantly in both numbers and theoretical focus, challenging students with varied problem-solving approaches.
-        - **Independent Questions**: Each question must be self-contained, without relying on other questions for context.
-        - **Complexity and Variety**: Introduce complexity and variety to challenge critical thinking and analytical skills.
-        - **Structural Consistency in Multi-Part Questions**: Maintain structural integrity by creating multi-part variants for multi-part original questions, ensuring each part is uniquely tailored yet consistent with the original format.
-        - **DO NOT GENERATE ANSWERS**
+        7. **Engage with Current Developments**: Integrate contemporary trends or recent discoveries related to the problem’s context, making the scenario more engaging and relevant for students.
 
-        ### Output Format - Strictly follow the output format
+        ### Multi-Part Problem Design:
 
-        #### Single-Part Questions:
+        1. **Consistency Across Parts**: Ensure that if the original problem is multi-part, the variations retain the same structure. Each part of the variant should correspond to the original, with appropriate changes to ensure uniqueness.
 
-        **Variant 1**: variant_1
-        **Variant 2**: variant_2
-        **Variant 3**: variant_3
-        **Variant 4**: variant_4
-        **Variant 5**: variant_5
+        2. **Layered Challenges**: Within each multi-part variant, introduce different layers of complexity by altering the relationships between parts. Ensure that each part adds depth to the overall problem.
 
-        #### Multi-Part Questions:
+        3. **Encourage Exploration**: Design each part to explore different aspects of the problem, pushing students to use a variety of techniques and perspectives to arrive at solutions.
 
-        **Variant 1**: 
-          a. variant_1_part_a
-          b. variant_1_part_b
-          c. variant_1_part_c
-        **Variant 2**: 
-          a. variant_2_part_a
-          b. variant_2_part_b
-          c. variant_2_part_c
+        ### Problem Complexity:
+
+        1. **Standalone Scenarios**: Ensure each problem is self-contained, providing enough information and complexity to stand on its own without reference to other problems.
+
+        2. **Promote Analytical Thinking**: Create problems that require deep thought and analysis, moving beyond simple calculations to engage students in understanding and application.
+
+        3. **Diverse Problem-Solving Approaches**: Design scenarios that encourage students to explore multiple methods of solving the problem, fostering creativity and flexibility in thinking.
+
+        ### Essential Considerations:
+        - **Complete Transformation**: Each scenario must differ significantly in numbers, conditions, and theoretical focus to provide a wide range of challenges.
+        - **Independent Design**: Each problem variant should be independent, not relying on others for context or information.
+        - **Variety and Depth**: Ensure a broad spectrum of challenges to stimulate critical thinking and in-depth analysis.
+        - **Structural Integrity**: In multi-part problems, maintain the original structure while ensuring each variant part is thoughtfully designed and distinct.
+        - **DO NOT INCLUDE ANSWERS OR SOLUTIONS**
+                                
+        ### Example 1: Single-Part Question with 3 Variants
+
+        **Original Question:**
+        *Question:* A sample of gas occupies 4 liters at a pressure of 2 atm and a temperature of 300 K. Calculate the number of moles of gas in the sample using the ideal gas law.
+        
+        Response-
+
+        Spanda
+        **Variant 1**:  
+        a. A sample of gas occupies 6 liters at a pressure of 1.5 atm and a temperature of 310 K. Calculate the number of moles of gas in the sample using the ideal gas law.
+        
+        Spanda
+        **Variant 2**:  
+        a. A sample of gas occupies 3 liters at a pressure of 2.5 atm and a temperature of 280 K. Calculate the number of moles of gas in the sample using the ideal gas law.
+        
+        Spanda
+        **Variant 3**:  
+        a. A sample of gas occupies 5 liters at a pressure of 1 atm and a temperature of 350 K. Calculate the number of moles of gas in the sample using the ideal gas law.
+
+        ### Example 2: Multi-Part Question with 2 Variants
+
+        **Original Question:**
+        *Question:*  
+        a. Find the roots of the quadratic equation \(x^2 - 4x + 3 = 0\).  
+        b. Determine the coordinates of the vertex of the parabola described by the equation \(y = x^2 - 4x + 3\).  
+        c. Calculate the axis of symmetry for the parabola.
+        
+        Response -
+        
+        Spanda
+        **Variant 1**:  
+        a. Find the roots of the quadratic equation \(x^2 - 6x + 8 = 0\).  
+        b. Determine the coordinates of the vertex of the parabola described by the equation \(y = x^2 - 6x + 8\).  
+        c. Calculate the axis of symmetry for the parabola.
+
+        Spanda
+        **Variant 2**:  
+        a. Find the roots of the quadratic equation \(2x^2 - 8x + 6 = 0\).  
+        b. Determine the coordinates of the vertex of the parabola described by the equation \(y = 2x^2 - 8x + 6\).  
+        c. Calculate the axis of symmetry for the parabola.
 
         Utilize these guidelines to generate distinct and engaging questions based on the given context.
     """
@@ -960,22 +959,25 @@ async def generate_question_variants(base_question, n, context):
             },
             {
                 "role": "user",
-                "content": f"""Please generate {n} variants of the question: '{base_question}'""",
+                "content": f"""Please generate {n} variants of the question: '{base_question}'.
+
+                In multi-part problems, maintain the original structure while ensuring each variant part is thoughtfully designed and distinct. Type 'Spanda' before the beggining of every variant. Make sure to add 'Spanda' before every variant, its important.
+                """,
             }
         ],
         "stream": False,
         "options": {
             "top_k": 20, 
-            "top_p": 0.5, 
-            "temperature": 0.5, 
+            "top_p": 0.7, 
+            "temperature": 0.7, 
             # "seed": 100, 
         }
     }
-    print("Original question" + base_question)
+    # print("Original question" + base_question)
     # Asynchronous call to Ollama API
     response = await asyncio.to_thread(ollama.chat, model='llama3.1', messages=payload['messages'], stream=payload['stream'])
     content = response['message']['content']
-    print("Response-" + content)
+    # print("Response-" + content)
     variants_dict = extract_variants(base_question, content)
     # Return the response content
     return response['message']['content'], variants_dict
