@@ -71,6 +71,25 @@ logger = logging.getLogger("API")
 load_dotenv()
 # Replace with your Moodle instance URL and token
 
+current_dir = os.path.dirname(__file__)
+
+# Step 2: Move up one directory level to 'goldenverba'
+base_dir = os.path.abspath(os.path.join(current_dir, '..'))
+
+# Step 3: Create the relative path to the .env file
+dotenv_path = os.path.join(base_dir, '.env')
+
+# Step 4: Load the .env file
+load_dotenv(dotenv_path)
+
+# Now you can access the environment variables
+SECRET_KEY = os.getenv('SECRET_KEY')
+ALGORITHM = os.getenv('ALGORITHM')
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv('ACCESS_TOKEN_EXPIRE_MINUTES'))
+MOODLE_URL = os.getenv('MOODLE_URL')
+LOGIN_URL = f'{MOODLE_URL}/login/index.php' 
+ACCESS_URL = f'{MOODLE_URL}/webservice/rest/server.php'
+TOKEN = os.getenv('TOKEN')
 # Check if runs in production
 production_key = os.environ.get("VERBA_PRODUCTION", "")
 tag = os.environ.get("VERBA_GOOGLE_TAG", "")
