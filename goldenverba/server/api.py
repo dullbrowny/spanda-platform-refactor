@@ -1934,7 +1934,6 @@ async def evaluate_Transcipt(request: QueryRequest):
 
 
     instructor_name = request.query
-
     all_responses = {}
     all_scores = {}
 
@@ -1943,29 +1942,23 @@ async def evaluate_Transcipt(request: QueryRequest):
         context = await make_request(query)  # Assuming make_request is defined elsewhere
         result_responses, result_scores = await instructor_eval(instructor_name, context, dimension, explanation)
 
+        # Log the raw outputs for debugging
         print(f"Dimension: {dimension}")
-        print(f"Result Responses: {result_responses}")
-        print(f"Result Scores: {result_scores}")
+        print(f"Raw Result Responses: {result_responses}")
+        print(f"Raw Result Scores: {result_scores}")
 
         # Safely access and store the responses and scores
-        if dimension in result_responses:
-            all_responses[dimension] = result_responses[dimension]['message']['content']
-        else:
-            all_responses[dimension] = "No response available"
+        all_responses[dimension] = result_responses.get('content', "No response available")
+        all_scores[dimension] = result_scores.get(dimension, "No score available")
 
-        if dimension in result_scores:
-            all_scores[dimension] = result_scores[dimension]
-        else:
-            all_scores[dimension] = "No score available"
-
-    print("SCORES:")
-    print(json.dumps(all_scores, indent=2))
+    print("Final Responses:", all_responses)
+    print("Final Scores:", all_scores)
     
     response = {
         "DOCUMENT": all_responses,
         "SCORES": all_scores
     }
-    
+
     return response
 
 async def resume_eval(resume_name, jd_name, context, score_criterion, explanation):
