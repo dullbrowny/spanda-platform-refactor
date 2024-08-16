@@ -1,11 +1,13 @@
-from fastapi import FastAPI, WebSocket, File, UploadFile, status, HTTPException, Request, Query
+from fastapi import FastAPI, WebSocket, File, UploadFile, status, HTTPException, Request, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from ollama import chat as ollama_chat
 from httpx import AsyncClient
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 import aiohttp
-
+import torch
+from typing import Optional
 import json
 import httpx
 import re , asyncio
@@ -20,15 +22,19 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 from starlette.websockets import WebSocketDisconnect
-from goldenverba.server.types import CourseIDRequest 
+from goldenverba.server.types import CourseIDRequest,AuthDetails, Token, TokenData, Course, TokenWithRoles, RequestAGA
 from wasabi import msg  # type: ignore[import]
 import time
+import hashlib
+import random
+import string
 # from goldenverba.server.bitsp import(
 #     ollama_afe,
 #     ollama_aga,
 #     ollama_aqg
 # )
 import logging
+from typing import Optional, List, Dict, Any
 from goldenverba import verba_manager
 from goldenverba.server.types import (
     ResetPayload,
@@ -42,8 +48,8 @@ from goldenverba.server.types import (
     MoodleRequest,
     QueryRequestaqg
 )
-
-from goldenverba.server.spanda_utils import chatbot
+from typing import Dict
+from goldenverba.server.spanda_utils import chatbot, dimensions_AFE
 import requests
 from docx import Document
 import fitz  # PyMuPDF
@@ -54,32 +60,17 @@ import re
 import csv
 import httpx
 import asyncio
+import jwt
+import hashlib
+from bs4 import BeautifulSoup
+import random
+import string
+from datetime import datetime, timedelta 
 from goldenverba.server.util import get_config, set_config, setup_managers
 logger = logging.getLogger("API")
 load_dotenv()
 # Replace with your Moodle instance URL and token
 
-MOODLE_URL = os.getenv('MOODLE_URL')
-TOKEN = os.getenv('TOKEN')
-
-# Function to make a Moodle API call
-def moodle_api_call(params, extra_params=None):
-    if extra_params:
-        params.update(extra_params)
-    endpoint = f'{MOODLE_URL}/webservice/rest/server.php'
-    response = requests.get(endpoint, params=params)
-    print(f"API Call to {params['wsfunction']} - Status Code: {response.status_code}")
-    print(f"API Request URL: {response.url}")  # Log the full URL for debugging
-
-    try:
-        result = response.json()
-    except ValueError as e:
-        raise ValueError(f"Error parsing JSON response: {response.text}") from e
-
-    if 'exception' in result:
-        raise Exception(f"Error: {result['exception']['message']}")
-
-    return result
 # Check if runs in production
 production_key = os.environ.get("VERBA_PRODUCTION", "")
 tag = os.environ.get("VERBA_GOOGLE_TAG", "")
@@ -97,12 +88,16 @@ app = FastAPI()
 
 origins = [
     "http://localhost:3000",
+    "http://localhost:4000",
+    "http://localhost:6000",
+    "http://localhost:5000",
     "https://verba-golden-ragtriever.onrender.com",
     "http://localhost:8000",
     "http://localhost:1511",
     "http://localhost/moodle", 
     "http://localhost", 
     "https://taxila-spanda.wilp-connect.net",
+    "https://bitsmart.vercel.app"
 ]
 
 app.add_middleware(
@@ -130,8 +125,232 @@ app.mount("/static", StaticFiles(directory=BASE_DIR / "frontend/out"), name="app
 @app.head("/")
 async def serve_frontend():
     return FileResponse(os.path.join(BASE_DIR, "frontend/out/index.html"))
+# Constants
+editing_teacher_courses: List[str] = []
 
-### GET
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
+
+# Function to make a Moodle API call
+def moodle_api_call(params, extra_params=None):
+    if extra_params:
+        params.update(extra_params)
+    endpoint = f'{MOODLE_URL}/webservice/rest/server.php'
+    response = requests.get(endpoint, params=params)
+    print(f"API Call to {params['wsfunction']} - Status Code: {response.status_code}")
+    print(f"API Request URL: {response.url}")  # Log the full URL for debugging
+
+    try:
+        result = response.json()
+    except ValueError as e:
+        raise ValueError(f"Error parsing JSON response: {response.text}") from e
+
+    if 'exception' in result:
+        raise Exception(f"Error: {result['exception']['message']}")
+
+    return result
+
+
+# Function to get the user ID by username
+def authenticate_user(username: str, password: str) -> Optional[dict]:
+    global editing_teacher_courses  # Access the global variable
+    
+    credentials = {
+        'username': username,
+        'password': password
+    }
+    
+    with requests.Session() as session:
+        try:
+            response = session.get(LOGIN_URL)
+            response.raise_for_status()
+            print("Login page fetched successfully.")
+        except requests.RequestException as e:
+            print(f"Failed to get login page: {e}")
+            return None
+        
+        soup = BeautifulSoup(response.text, 'html.parser')
+        logintoken = soup.find('input', {'name': 'logintoken'})
+        if logintoken:
+            credentials['logintoken'] = logintoken['value']
+            print("Login token found:", logintoken['value'])
+        else:
+            print("Login token not found. Check if the login page structure has changed.")
+            return None
+        
+        try:
+            response = session.post(LOGIN_URL, data=credentials)
+            response.raise_for_status()
+            print("Login attempt response status code:", response.status_code)
+        except requests.RequestException as e:
+            print(f"Login failed: {e}")
+            return None
+        
+        if 'Log out' in response.text:
+            print("Login successful.")
+            userid = get_user_id_by_username(TOKEN, ACCESS_URL, username)
+            if userid:
+                print("User ID found:", userid)
+                courses = get_user_courses(TOKEN, ACCESS_URL, userid)
+                if not courses:
+                    print("No courses found for user.")
+                
+                global editing_teacher_courses
+                editing_teacher_courses = []  # Reset the global variable
+                roles_found = []
+                
+                for course in courses:
+                    roles = get_user_role_in_course(TOKEN, ACCESS_URL, course['id'], userid)
+                    course_roles = [role['shortname'] for role in roles]
+                    print("Roles found for course:", course.get('shortname', 'Unnamed Course'), course_roles)
+                    
+                    if 'editingteacher' in course_roles:
+                        editing_teacher_courses.append(course['shortname'])  # Append only the shortname
+                        roles_found.append('editingteacher')
+                        print("User has 'editingteacher' role in course:", course.get('shortname', 'Unnamed Course'))
+                    
+                    if 'manager' in course_roles:
+                        roles_found.append('manager')
+                        print("User has 'manager' role in course:", course.get('shortname', 'Unnamed Course'))
+                        
+                print("Roles found for user:", roles_found)
+                if roles_found:
+                    # Generate an access token with the roles embedded in the payload
+                    token = create_access_token(data={"sub": username, "roles": roles_found})
+                    return {"access_token": token, "roles": roles_found}
+                else:
+                    print("No valid roles found for user.")
+                    return None
+            else:
+                print("User ID not found.")
+                return None
+        else:
+            print("Login failed or unexpected response.")
+            return None
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
+    to_encode = data.copy()
+    expire = datetime.utcnow() + (expires_delta if expires_delta else timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+
+def verify_token(token: str) -> TokenData:
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        if username is None:
+            raise ValueError("Invalid authentication credentials")
+        return TokenData(username=username)
+    except jwt.PyJWTError as e:
+        print(f"Token verification failed: {e}")
+        raise ValueError("Invalid authentication credentials")
+
+def get_current_user(request: Request) -> TokenData:
+    auth_header = request.headers.get("Authorization")
+    if auth_header is None or not auth_header.startswith("Bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authorization header missing or malformed"
+        )
+    
+    token = auth_header[len("Bearer "):]
+    return verify_token(token)
+
+def get_user_id_by_username(token, moodle_url, username):
+    params = {
+        "wstoken": token,
+        "wsfunction": "core_user_get_users_by_field",
+        "moodlewsrestformat": "json",
+        "field": "username",
+        "values[0]": username
+    }
+    try:
+        response = requests.get(moodle_url, params=params)
+        response.raise_for_status()
+        print("User ID fetch response status code:", response.status_code)
+        print("Response Text:", response.text)
+        users = response.json()
+        if users:
+            return users[0]['id']
+    except (requests.RequestException, requests.exceptions.JSONDecodeError) as e:
+        print(f"Error fetching user ID: {e}")
+    return None
+
+def get_user_courses(token, moodle_url, userid):
+    params = {
+        "wstoken": token,
+        "wsfunction": "core_enrol_get_users_courses",
+        "moodlewsrestformat": "json",
+        "userid": userid
+    }
+    try:
+        response = requests.get(moodle_url, params=params)
+        response.raise_for_status()
+        print("User courses fetch response status code:", response.status_code)
+        print("Response Text:", response.text)
+        return response.json()
+    except (requests.RequestException, requests.exceptions.JSONDecodeError) as e:
+        print(f"Error fetching user courses: {e}")
+    return []
+
+def get_user_role_in_course(token, moodle_url, courseid, userid):
+    params = {
+        "wstoken": token,
+        "wsfunction": "core_enrol_get_enrolled_users",
+        "moodlewsrestformat": "json",
+        "courseid": courseid
+    }
+    try:
+        response = requests.get(moodle_url, params=params)
+        response.raise_for_status()
+        print("User roles fetch response status code:", response.status_code)
+        print("Response Text:", response.text)
+        users = response.json()
+        for user in users:
+            if user['id'] == userid:
+                return user['roles']
+    except (requests.RequestException, requests.exceptions.JSONDecodeError) as e:
+        print(f"Error fetching user roles: {e}")
+    return []
+
+# FastAPI endpoints
+@app.post("/token", response_model=TokenWithRoles)
+async def login(form_data: OAuth2PasswordRequestForm = Depends()):
+    auth_data = authenticate_user(form_data.username, form_data.password)
+    print("AUTH", auth_data)
+    if auth_data is None:
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    
+    print("Returning access token and roles:", auth_data)
+    return {
+        "access_token": auth_data["access_token"],
+        "token_type": "bearer",
+        "roles": auth_data["roles"]
+    }
+
+
+@app.get("/check-auth")
+async def check_auth(current_user: TokenData = Depends(get_current_user)): 
+    return {"status": "authenticated", "user": current_user.username}
+
+
+@app.get("/editing_teacher_courses", response_model=List[str])
+def get_editing_teacher_courses():
+    if not editing_teacher_courses:
+        raise HTTPException(status_code=404, detail="No courses found.")
+    return editing_teacher_courses
+
+# @app.post("/api/spandachat")
+# async def spanda_chat(request: QueryRequest, token: str = Depends(oauth2_scheme)):
+    
+#     get_current_user(token)
+#     context = await make_request(request.query)
+#     if context is None:
+#         raise HTTPException(status_code=500, detail="Failed to fetch context")
+    
+#     answer = await chatbot(request.query, context)
+#     return {"answer": answer}
+
 
 # Define health check endpoint
 logging.basicConfig(level=logging.INFO)
@@ -545,7 +764,7 @@ async def delete_document(payload: GetDocumentPayload):
 async def make_request(query_user):
     # Escape the query to handle special characters and newlines
     formatted_query = json.dumps(query_user)
-
+    
     # Create a payload with the formatted query
     payload = QueryPayload(query=formatted_query)
 
@@ -984,27 +1203,18 @@ async def generate_question_variants(base_question, n, context):
 
 
 def extract_variants(base_question, content):
-    
-    variant_pattern = re.compile(r'(\*\*Variant \d+:\*\*.*?)(?=\*\*Variant \d+:|\Z)', re.DOTALL)
+    # Regex pattern to capture everything after "Spanda" and before the next "Spanda" or the end of the content
+    variant_pattern = re.compile(r'(Spanda.*?)(?=Spanda|\Z)', re.DOTALL)
     
     # Find all variants
     variants = variant_pattern.findall(content)
     
-    # Debug: print found variants
-    # print("Found variants:")
-    # print(variants)
-    
     variant_contents = []
     
     for variant in variants:
-        # Remove the variant title and keep only the content
-        content_without_title = variant.split('\n', 1)[1].strip()  # Remove the first line (variant title)
-        variant_contents.append(content_without_title)  # Store the content in the list
+        variant_contents.append(variant.strip())  # Store the content in the list and remove leading/trailing whitespace
     
-    # print  (variant_contents)
-
     return {base_question: variant_contents}
-
 
 @app.post("/api/assignments")
 async def get_the_assignments(request: CourseIDRequest):
@@ -1188,6 +1398,7 @@ def extract_qa_pairs(text):
         return [text.strip()]
     return [pair.strip() for pair in qa_pairs]
 
+
 # Function to send Q&A pair to grading endpoint and get response
 async def process_user_submissions(user, submissions_by_user, activity_type):
     user_id = user['id']
@@ -1219,8 +1430,11 @@ async def process_user_submissions(user, submissions_by_user, activity_type):
                             print("QAPAIRS", qa_pairs)
                             for i, qa_pair in enumerate(qa_pairs):
                                 try:
+                                    # Convert the dictionary to QueryRequest instance
+                                    query_request = QueryRequest(query=qa_pair)
+                                    
                                     # Call the OllamaGA function directly
-                                    result = await ollama_aga({"query": qa_pair})
+                                    result = await ollama_aga(query_request)
                                     justification = result.get("justification")
                                     avg_score = result.get("average_score")
                                     total_score += avg_score
@@ -1258,13 +1472,65 @@ def write_to_csv(data, course_id, assignment_name):
     filename = f"Course_{course_id}_{assignment_name.replace(' ', '_')}_autograded.csv"
     with open(filename, mode='w', newline='', encoding='utf-8') as file:
         writer = csv.writer(file)
-        
+        print("FILENAME",filename)
         writer.writerow(["Full Name", "User ID", "Email", "Total Score", "Feedback"])
-        
+        print("DATA",data,course_id,assignment_name)
         for row in data:
             writer.writerow([row["Full Name"], row["User ID"], row["Email"], row["Total Score"], row["Feedback"]])
 
-    print(f"Data successfully written to CSV file: {filename}")
+async def process_user_submissions2(user, submissions_by_user, activity_type, token):
+    user_id = user['id']
+    user_fullname = user['fullname']
+    user_email = user['email']
+    user_submission = submissions_by_user.get(user_id)
+    
+    if not user_submission:
+        return {
+            "Full Name": user_fullname,
+            "User ID": user_id,
+            "Email": user_email,
+            "Total Score": 0,
+            "Feedback": "No submission"
+        }
+    
+    total_score = 0
+    all_comments = []
+
+    if activity_type == 'assignment':
+        for plugin in user_submission['plugins']:
+            if plugin['type'] == 'file':
+                for filearea in plugin['fileareas']:
+                    for file in filearea['files']:
+                        try:
+                            print(f"\nProcessing file: {file['filename']} for {user_fullname}...")
+                            text = extract_text_from_submission(file)
+                            qa_pairs = extract_qa_pairs(text)
+                            print("QAPAIRS", qa_pairs)
+                            for i, qa_pair in enumerate(qa_pairs):
+                                try:
+                                    # Ensure qa_pair is a string
+                                    query_request = QueryRequest(query=qa_pair)  # Remove the list brackets
+                                    result = await ollama_aga2(query_request, token)
+                                    justification = result.get("justification")
+                                    avg_score = result.get("average_score")
+                                    total_score += avg_score
+                                    comment = f"Q{i+1}: {justification}"
+                                    all_comments.append(comment)
+
+                                    print(f"  Graded Q{i+1}: Avg. Score = {avg_score:.2f} - {justification}")
+                                except Exception as e:
+                                    print(f"  Error grading Q&A pair {i+1} for {user['fullname']}: {str(e)}")
+                        except Exception as e:
+                            print(f"  Error extracting text for {user_fullname}: {str(e)}")
+        feedback = " | ".join(all_comments)
+    return {
+        "Full Name": user_fullname,
+        "User ID": user_id,
+        "Email": user_email,
+        "Total Score": total_score,
+        "Feedback": feedback
+    }
+
 
 # Function to update a user's grade in Moodle
 def update_grade(user_id, assignment_id, grade, feedback):
@@ -1341,11 +1607,74 @@ async def moodle_integration_pipeline(course_shortname, assignment_name, activit
         print(f"\nAn error occurred: {str(e)}")
         raise
 
+# Main function to integrate with Moodle
+async def moodle_integration_pipeline2(course_shortname: str, assignment_name: str, activity_type: str, token: str):
+    try:
+        print(f"\n=== Fetching Course Details for Shortname: {course_shortname} ===")
+        course_id, course_name = get_course_info_by_shortname(course_shortname)
+        print(f"Course ID: {course_id}, Course Name: {course_name}")
+
+        # Fetching course details
+        print(f"\n=== Fetching Course Details for Course ID: {course_id} ===")
+        course_details = get_course_by_id(course_id)
+        if not course_details:
+            raise Exception("Course not found.")
+        course_name = course_details[0]['fullname']
+        print(f"Course Name: {course_name}")
+
+        # Fetching enrolled users
+        print("\n=== Fetching Enrolled Users ===")
+        users = get_enrolled_users(course_id)
+        print(f"Found {len(users)} enrolled users.")
+
+        if activity_type == 'assignment':
+            # Fetching assignments
+            print("\n=== Fetching Assignments ===")
+            activities = get_assignments(course_id)
+        else:
+            raise Exception("Unsupported activity type.")
+
+        print(f"Found {len(activities)} {activity_type}s.")
+
+        # Matching the activity by name
+        activity = next((a for a in activities if a['name'].strip().lower() == assignment_name.strip().lower()), None)
+        if not activity:
+            raise Exception(f"{activity_type.capitalize()} not found.")
+
+        activity_id = activity['id']
+        print(f"{activity_type.capitalize()} '{assignment_name}' found with ID: {activity_id}")
+
+        # Fetching submissions for the assignment
+        print("\n=== Fetching Submissions ===")
+        submissions = get_assignment_submissions(activity_id)
+
+        print(f"Found {len(submissions)} submissions.")
+
+        submissions_by_user = {s['userid']: s for s in submissions}
+
+        # Processing submissions
+        print("\n=== Processing Submissions ===")
+        tasks = [process_user_submissions2(user, submissions_by_user, activity_type, token) for user in users]
+        processed_data = await asyncio.gather(*tasks)
+        print("PROCESSED DATA",processed_data)
+        # Writing data to CSV
+        print("\n=== Writing Data to CSV ===")
+        write_to_csv(processed_data, course_id, assignment_name)
+
+        print("\n=== Processing Completed Successfully ===")
+        return processed_data
+
+    except Exception as e:
+        print(f"\nAn error occurred: {str(e)}")
+        raise
+# Main function to integrate with Moodle
+
+
 @app.post("/api/process")
-async def grade_assignment(request: Request):
-    data = await request.json()
-    course_shortname = data.get("course_shortname")
-    assignment_name = data.get("assignment_name")
+async def grade_assignment(request: RequestAGA):
+    
+    course_shortname = request.course_shortname
+    assignment_name = request.assignment_name
     activity_type = "assignment"
 
     try:
@@ -1354,9 +1683,23 @@ async def grade_assignment(request: Request):
     except Exception as e:
         return JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
 
+@app.post("/api/process2")
+async def grade_assignment(request: RequestAGA, token: str = Depends(oauth2_scheme)):
+    # Extract data from request
+    # data = await request.json()
+    course_shortname = request.course_shortname
+    assignment_name = request.assignment_name
+    activity_type = "assignment"
+
+    try:
+        # Call moodle_integration_pipeline with token
+        processed_data = await moodle_integration_pipeline2(course_shortname, assignment_name, activity_type, token)
+        return JSONResponse(content={"status": "success", "message": "Grading completed successfully", "data": processed_data})
+    except Exception as e:
+        return JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
 
 
- 
+    
 @app.post("/api/ollamaAGA")
 async def ollama_aga(request: QueryRequest):
     context = await make_request(request.query)
@@ -1372,19 +1715,14 @@ async def ollama_aga(request: QueryRequest):
     
     return response
 
-@app.post("/api/spandachat")
-async def spanda_chat(request: QueryRequest):
+@app.post("/api/ollamaAGA2")
+async def ollama_aga2(request: QueryRequest, current_user: TokenData = Depends(get_current_user)):
     context = await make_request(request.query)
     if context is None:
-        raise Exception("Failed to fetch context")
+        raise HTTPException(status_code=500, detail="Failed to fetch context")
     
-    answer = await chatbot(request.query, context)
-    
-    response = {
-        "answer": answer
-    }
-    
-    return response
+    variants, avg_score = await grading_assistant(request.query, context)
+    return {"justification": variants, "average_score": avg_score}
 
 @app.post("/api/ollamaAQG")
 async def ollama_aqg(request: QueryRequestaqg):
@@ -1399,271 +1737,38 @@ async def ollama_aqg(request: QueryRequestaqg):
     return response
 
 
+
+@app.post("/api/ollamaAQG2")
+async def ollama_aqg(request: QueryRequestaqg, current_user: TokenData = Depends(get_current_user)):
+   
+    # Token has already been validated by get_current_user, so you can proceed
+    context = await make_request(request.query)
+    
+    if context is None:
+        raise HTTPException(status_code=500, detail="Failed to fetch context")
+    
+    variants, variants_dict = await generate_question_variants(request.query, request.NumberOfVariants, context)
+    
+    return {"variants": variants, "variants_dict": variants_dict}
+
+
+@app.post("/api/spandachat")
+async def spanda_chat(request: QueryRequest):
+    context = await make_request(request.query)
+    if context is None:
+        raise Exception("Failed to fetch context")
+    
+    answer = await chatbot(request.query, context)
+    
+    response = {
+        "answer": answer
+    }
+    
+    return response
+
 @app.post("/api/ollamaAFE")
 async def ollama_afe(request: QueryRequest):
-    dimensions = {
-        # Example structure, fill in with actual dimensions and sub-dimensions
-      "Mastery of the Subject": {
-            "weight": 0.169,
-            "sub-dimensions": {
-                "Knowledge of Content and Pedagogy": {
-                    "weight": 0.362,
-                    "definition": "A deep understanding of their subject matter and the best practices for teaching it.",
-                    "example": "In a mathematics course on real analysis, the professor demonstrates best practices by Guiding students through the process of constructing formal proofs step-by-step, highlighting common pitfalls and techniques for overcoming them.",
-                    "criteria": {
-                        1: "The transcript demonstrates minimal knowledge of content and ineffective pedagogical practices",
-                        2: "The transcript demonstrates basic content knowledge but lacks pedagogical skills",
-                        3: "The transcript demonstrates adequate content knowledge and uses some effective pedagogical practices",
-                        4: "The transcript demonstrates strong content knowledge and consistently uses effective pedagogical practices",
-                        5: "The transcript demonstrates exceptional content knowledge and masterfully employs a wide range of pedagogical practices"
-                    }
-                },
-                # "Breadth of Coverage": {
-                #     "weight": 0.327,
-                #     "definition": "Awareness of different possible perspectives related to the topic taught",
-                #     "example": "Teacher discusses different theoretical views, current and prior scientific developments, etc.",
-                #     "criteria": {
-                #         1: "The transcript shows that the instructor covers minimal content with significant gaps in the curriculum",
-                #         2: "The transcript shows that the instructor covers some content but with notable gaps in the curriculum",
-                #         3: "The transcript shows that the instructor covers most of the required content with minor gaps",
-                #         4: "The transcript shows that the instructor covers all required content thoroughly",
-                #         5: "The transcript shows that the instructor covers all required content and provides additional enrichment material"
-                #     }
-                # },
-                "Knowledge of Resources": {
-                    "weight": 0.310,
-                    "definition": "Awareness of and utilization of a variety of current resources in the subject area to enhance instruction",
-                    "example": "The teacher cites recent research studies or books while explaining relevant concepts.",
-                    "criteria": {
-                        1: "The transcript shows that the instructor demonstrates minimal awareness of resources available for teaching",
-                        2: "The transcript shows that the instructor demonstrates limited knowledge of resources and rarely incorporates them",
-                        3: "The transcript shows that the instructor demonstrates adequate knowledge of resources and sometimes incorporates them",
-                        4: "The transcript shows that the instructor demonstrates strong knowledge of resources and frequently incorporates them",
-                        5: "The transcript shows that the instructor demonstrates extensive knowledge of resources and consistently incorporates a wide variety of them"
-                    }
-                }
-            }
-        },
-        "Expository Quality": {
-            "weight": 0.179,
-            "sub-dimensions": {
-                "Content Clarity": {
-                    "weight": 0.266,
-                    "definition": "Extent to which the teacher is able to explain the content to promote clarity and ease of understanding.",
-                    "example": "Teacher uses simple vocabulary and concise sentences to explain complex concepts.",
-                    "criteria": {
-                        1: "Does not break down complex concepts, uses confusing, imprecise, and inappropriate language, and does not employ any relevant techniques or integrate them into the lesson flow.",
-                        2: "Inconsistently breaks down complex concepts using language that is sometimes confusing or inappropriate, employing few minimally relevant techniques that contribute little to student understanding, struggling to integrate them into the lesson flow.",
-                        3: "Generally breaks down complex concepts using simple, precise language and some techniques that are somewhat relevant and contribute to student understanding, integrating them into the lesson flow with occasional inconsistencies.",
-                        4: "Frequently breaks down complex concepts using simple, precise language and a variety of relevant, engaging techniques that contribute to student understanding.",
-                        5: "Consistently breaks down complex concepts using simple, precise language and a wide variety of highly relevant, engaging techniques such as analogies, examples, visuals, etc. to student understanding, seamlessly integrating them into the lesson flow."
-                    }
-                },
-                # "Demonstrating Flexibility and Responsiveness": {
-                #     "weight": 0.248,
-                #     "definition": "Ability to adapt to the changing needs of the students in the class while explaining the concepts.",
-                #     "example": "The teacher tries to explain a concept using a particular example. On finding that the students are unable to understand, the teacher is able to produce alternate examples or explanation strategies to clarify the concept.",
-                #     "criteria": {
-                #         1: "Fails to adapt explanations based on student needs and does not provide alternate examples or strategies.",
-                #         2: "Rarely adapts explanations, often sticking to the same methods even when students struggle to understand.",
-                #         3: "Sometimes adapts explanations and provides alternate examples or strategies, but with limited effectiveness.",
-                #         4: "Frequently adapts explanations and offers a variety of alternate examples or strategies that aid student understanding.",
-                #         5: "Consistently and seamlessly adapts explanations, providing a wide range of highly effective alternate examples or strategies tailored to student needs."
-                #     }
-                # },
-                "Differentiation Strategies": {
-                    "weight": 0.246,
-                    "definition": "The methods and approaches used by the teacher to accommodate diverse student needs, backgrounds, learning styles, and abilities.",
-                    "example": "During a lesson, the teacher divides the class into small groups based on their readiness levels. She provides more advanced problems for students who grasp the concept quickly, while offering additional support and manipulatives for students who need more help.",
-                    "criteria": {
-                        1: "Uses no differentiation strategies to meet diverse student needs",
-                        2: "Uses minimal differentiation strategies with limited effectiveness",
-                        3: "Uses some differentiation strategies with moderate effectiveness",
-                        4: "Consistently uses a variety of differentiation strategies effectively",
-                        5: "Masterfully employs a wide range of differentiation strategies to meet the needs of all learners"
-                    }
-                },
-                "Communication Clarity": {
-                    "weight": 0.238,
-                    "definition": "The ability of the teacher to effectively convey information and instructions to students in a clear and understandable manner.",
-                    "example": "The teachers voice and language is clear with the use of appropriate voice modulation, tone, and pitch to facilitate ease of understanding.",
-                    "criteria": {
-                        1: "Communicates poorly with students, leading to confusion and misunderstandings",
-                        2: "Communicates with some clarity but often lacks precision or coherence",
-                        3: "Communicates clearly most of the time, with occasional lapses in clarity",
-                        4: "Consistently communicates clearly and effectively with students",
-                        5: "Communicates with exceptional clarity, precision, and coherence, ensuring full understanding"
-                    }
-                }
-            }
-        },
-        "Class Management": {
-            "weight": 0.150,
-            "sub-dimensions": {
-                "Punctuality": {
-                    "weight": 0.261,
-                    "definition": "The consistency and timeliness of the teacher's arrival to class sessions, meetings, and other professional obligations.",
-                    "example": "The teacher starts and completes live lectures as per the designated time.",
-                    "criteria": {
-                        1: "Transcripts consistently show late class start times and/or early end times",
-                        2: "Transcripts occasionally show late class start times and/or early end times",
-                        3: "Transcripts usually show on-time class start and end times",
-                        4: "Transcripts consistently show on-time class start and end times",
-                        5: "Transcripts always show early class start times and full preparation to begin class on time"
-                    }
-                },
-                "Managing Classroom Routines": {
-                    "weight": 0.255,
-                    "definition": "The Teacher establishes and maintains efficient routines and procedures to maximize instructional time.",
-                    "example": "The teacher starts every session with a recap quiz to remind learners of what was taught earlier. Students prepare for the recap even before the teacher enters the class in a habitual manner.",
-                    "criteria": {
-                        1: "Classroom routines are poorly managed, leading to confusion and lost instructional time",
-                        2: "Classroom routines are somewhat managed but with frequent disruptions",
-                        3: "Classroom routines are adequately managed with occasional disruptions",
-                        4: "Classroom routines are well-managed, leading to smooth transitions and minimal disruptions",
-                        5: "Classroom routines are expertly managed, maximizing instructional time and creating a seamless learning environment"
-                    }
-                },
-                "Managing Student Behavior": {
-                    "weight": 0.240,
-                    "definition": "The teacher sets clear expectations for behavior and uses effective strategies to prevent and address misbehavior. The teacher encourages student participation and provides fair and equal opportunities to all students in class. The teacher also provides appropriate compliments and feedback to learners’ responses.",
-                    "example": "The teacher addresses a students misbehavior in the class in a professional manner and provides constructive feedback using clear guidelines for student behavior expected in the course.",
-                    "criteria": {
-                        1: "Struggles to manage student behavior, leading to frequent disruptions and an unproductive learning environment. Rarely encourages student participation, with little to no effort to ensure equal opportunities for engagement; provides no or inappropriate feedback and compliments that do not support learning or motivation.",
-                        2: "Manages student behavior with limited effectiveness, with some disruptions and off-task behavior. Inconsistently encourages student participation, with unequal opportunities for engagement; provides limited or generic feedback and compliments that minimally support learning and motivation.",
-                        3: "Manages student behavior adequately, maintaining a generally productive learning environment. Generally encourages student participation and provides opportunities for engagement, but some students may dominate or be overlooked; provides feedback and compliments, but they may not always be specific or constructive.",
-                        4: "Effectively manages student behavior, promoting a positive and productive learning environment. Frequently encourages student participation, provides fair opportunities for engagement, and offers appropriate feedback and compliments that support learning and motivation.",
-                        5: "Expertly manages student behavior, fostering a highly respectful, engaged, and self-regulated learning community. Consistently encourages active participation from all students, ensures equal opportunities for engagement, and provides specific, timely, and constructive feedback and compliments that enhance learning and motivation."
-                    }
-                },
-                # "Adherence to Rules": {
-                #     "weight": 0.242,
-                #     "definition": "The extent to which the teacher follows established rules, procedures, and policies governing classroom conduct and professional behavior.",
-                #     "example": "The teacher reminds the students to not circulate cracked versions of a software on the class discussion forum.",
-                #     "criteria": {
-                #         1: "Consistently disregards or violates school rules and policies",
-                #         2: "Occasionally disregards or violates school rules and policies",
-                #         3: "Generally adheres to school rules and policies with occasional lapses",
-                #         4: "Consistently adheres to school rules and policies",
-                #         5: "Strictly adheres to school rules and policies and actively promotes compliance among students"
-                #     }
-                # }
-            }
-        },
-        "Structuring of Objectives and Content": {
-            "weight": 0.168,
-            "sub-dimensions": {
-                "Organization": {
-                    "weight": 0.338,
-                    "definition": "The extent to which content is presented in a structured and comprehensive manner with emphasis on important content and proper linking content.",
-                    "example": "Teacher starts the class by providing an outline of what all will be covered in that particular class and connects it to previous knowledge of learners.",
-                    "criteria": {
-                        1: "Transcripts indicate content that is poorly organized, with minimal structure and no clear emphasis on important content. Linking between content is absent or confusing.",
-                        2: "Transcripts indicate content that is somewhat organized but lacks a consistent structure and comprehensive coverage. Emphasis on important content is inconsistent, and linking between content is weak",
-                        3: "Transcripts indicate content that is adequately organized, with a generally clear structure and comprehensive coverage. Important content is usually emphasized, and linking between content is present.",
-                        4: "Transcripts indicate content that is well-organized, with a consistent and clear structure and comprehensive coverage. Important content is consistently emphasized, and linking between content is effective.",
-                        5: "Transcripts indicate content that is exceptionally well-organized, with a highly structured, logical, and comprehensive presentation. Important content is strategically emphasized, and linking between content is seamless and enhances learning."
-                    }
-                },
-                "Clarity of Instructional Objectives": {
-                    "weight": 0.342,
-                    "definition": "The clarity and specificity of the learning objectives communicated to students, guiding the focus and direction of instruction.",
-                    "example": "At the start of the lesson, the teacher displays the learning objectives and takes a few moments to explain them to the students.",
-                    "criteria": {
-                        1: "Content is presented in a confusing or unclear manner",
-                        2: "Content is presented with some clarity but with frequent gaps or inconsistencies",
-                        3: "Content is presented with adequate clarity, allowing for general understanding",
-                        4: "Content is presented with consistent clarity, promoting deep understanding",
-                        5: "Content is presented with exceptional clarity, facilitating mastery and transfer of knowledge"
-                    }
-                },
-                "Alignment with the Curriculum": {
-                    "weight": 0.319,
-                    "definition": "The degree to which the teacher's instructional plans and activities align with the prescribed curriculum objectives and standards.",
-                    "example": "The teacher discusses a unit plan that clearly shows the connections between her learning objectives, instructional activities, assessments, and the corresponding curriculum standards.",
-                    "criteria": {
-                        1: "Instruction is poorly aligned with the curriculum, with significant gaps or deviations",
-                        2: "Instruction is somewhat aligned with the curriculum but with frequent inconsistencies",
-                        3: "Instruction is generally aligned with the curriculum, covering most required content",
-                        4: "Instruction is consistently aligned with the curriculum, covering all required content",
-                        5: "Instruction is perfectly aligned with the curriculum, covering all required content and providing meaningful extensions"
-                    }
-                }
-            }
-        },
-        "Qualities of Interaction": {
-            "weight": 0.168,
-            "sub-dimensions": {
-                "Instructor Enthusiasm And Positive demeanor": {
-                    "weight": 0.546,
-                    "definition": "Extent to which a teacher is enthusiastic and committed to making the course interesting, active, dynamic, humorous, etc.",
-                    "example": "Teacher uses an interesting fact or joke to engage the class.",
-                    "criteria": {
-                        1: "Instructor exhibits a negative or indifferent demeanor and lacks enthusiasm for teaching",
-                        2: "Instructor exhibits a neutral demeanor and occasional enthusiasm for teaching",
-                        3: "Instructor exhibits a generally positive demeanor and moderate enthusiasm for teaching",
-                        4: "Instructor exhibits a consistently positive demeanor and strong enthusiasm for teaching",
-                        5: "Instructor exhibits an exceptionally positive demeanor and infectious enthusiasm for teaching, inspiring student engagement"
-                    }
-                },
-                "Individual Rapport": {
-                    "weight": 0.453,
-                    "definition": "Extent to which the teacher develops a rapport with individual students and their concerns during and beyond class hours. The teacher provides assistance, guidance, and resources to help students overcome obstacles, address challenges, and achieve success.",
-                    "example": "Teacher shows an interest in student concerns, and attempts to resolve individual queries both during the class and through forums/individual communication.",
-                    "criteria": {
-                        1: "Minimal or negative rapport with individual students interactions",
-                        2: "Limited rapport with individual students, with infrequent personalized",
-                        3: "Adequate rapport with individual students, with some personalized interactions",
-                        4: "Strong rapport with individual students, with frequent personalized interactions and support",
-                        5: "Exceptional rapport with each individual student, with highly personalized interactions, support, and guidance"
-                    }
-                }
-            }
-        },
-        "Evaluation of Learning": {
-            "weight": 0.163,
-            "sub-dimensions": {
-                "Course Level Assessment": {
-                    "weight": 0.333,
-                    "definition": "The course level assessment is in line with the curriculum of the course and effectively checks whether the course outcomes are being met.",
-                    "example": "The teacher selects or uses test items that reflect the course outcome.",
-                    "criteria": {
-                        1: "The course level assessment is not aligned with the curriculum, does not cover course outcomes, and uses methods that are ineffective in measuring student achievement of these outcomes.",
-                        2: "The course level assessment is poorly aligned with the curriculum, covers few course outcomes, and uses methods that are limited in their ability to effectively measure student achievement of these outcomes.",
-                        3: "The course level assessment is generally aligned with the curriculum, covers some course outcomes, and uses methods that adequately measure student achievement of these outcomes, but may have minor gaps or inconsistencies.",
-                        4: "The course level assessment is well-aligned with the curriculum, covers most course outcomes, and uses appropriate methods to effectively measure student achievement of these outcomes.",
-                        5: "The course level assessment is perfectly aligned with the curriculum, comprehensively covers all course outcomes, and employs highly effective methods to accurately measure student achievement of these outcomes."
-                    }
-                },
-                "Clear Grading Criteria": {
-                    "weight": 0.333,
-                    "definition": "The teacher uses a clear and structured rubric which is communicated to the learners prior to any evaluation. The teacher is not biased in their assessment of learner performance.",
-                    "example": "The teacher discusses the assessment rubric by providing examples of good responses and the criteria for grading with the learners before conducting any tests.",
-                    "criteria": {
-                        1: "The teacher rarely or never uses a rubric, does not communicate assessment criteria to learners before evaluation, and the teacher's assessment is highly biased and unfair.",
-                        2: "The teacher inconsistently uses a rubric that is poorly structured or not clearly communicated to learners before evaluation, and the teacher's assessment may be noticeably biased at times.",
-                        3: "The teacher generally uses a rubric that is communicated to learners before evaluation, but the rubric may lack some clarity or structure, and the teacher's assessment may occasionally show minor bias.",
-                        4: "The teacher frequently uses a clear and structured rubric that is communicated to learners prior to evaluation, and applies the rubric fairly to all learners with minimal bias.",
-                        5: "The teacher consistently uses a well-defined, comprehensive rubric that is clearly communicated to learners well in advance of any evaluation, and applies the rubric objectively and fairly to all learners without any bias."
-                    }
-                },
-                "Assignments/readings": {
-                    "weight": 0.332,
-                    "definition": "The teacher provides assignments/homework/literature which is relevant and contributes to a deeper understanding of the topics taught to track the progress of learners. The teacher also discusses the solutions and feedback based on previously assigned homework/assignment.",
-                    "example": "The teacher provides clear instructions on the homework task that the students are given and how it is relevant to the topics taught in class. In the following class, the teacher discusses the answers and any common mistakes made by learners.",
-                    "criteria": {
-                        1: "The teacher rarely or never provides relevant assignments, homework, or literature that contribute to understanding the topics taught, does not track learner progress, and fails to discuss solutions and feedback based on previous work.",
-                        2: "The teacher inconsistently provides assignments, homework, and literature that are minimally relevant and contribute little to understanding the topics taught, rarely tracks learner progress, and seldom discusses solutions and feedback based on previous work.",
-                        3: "The teacher generally provides assignments, homework, and literature that are somewhat relevant and contribute to understanding the topics taught, occasionally tracks learner progress, and sometimes discusses solutions and feedback based on previous work.",
-                        4: "The teacher frequently provides relevant assignments, homework, and literature that contribute to a deeper understanding of the topics taught, tracks learner progress, and discusses solutions and feedback based on previously assigned work.",
-                        5: "The teacher consistently provides highly relevant and challenging assignments, homework, and literature that significantly deepen learners' understanding of the topics taught, regularly tracks learner progress, and engages in thorough discussions of solutions and feedback based on previous work."
-                    }
-                }
-            }
-        }
-    
-    }
-
+    dimensions = dimensions_AFE
     instructor_name = request.query
     dimension_scores = {}
     all_responses = {}
@@ -1704,6 +1809,7 @@ async def ollama_afe(request: QueryRequest):
         "dimension_scores": dimension_scores,
         "DOCUMENT": all_responses
     }
+
 # Modified import endpoint to handle transcript uploads
 @app.post("/api/importTranscript")
 async def import_transcript(transcript_data: UploadFile = File(...)):
@@ -1815,18 +1921,27 @@ async def evaluate_Transcipt(request: QueryRequest):
 
     for dimension, explanation in dimensions.items():
         query = f"Judge document name {instructor_name} based on {dimension}."
-        context = await make_request(query)  # Assuming make_request is defined elsewhere to get the context
-        # print(f"CONTEXT for {dimension}:")
-        # print(context)  # Print the context generated
+        context = await make_request(query)  # Assuming make_request is defined elsewhere
         result_responses, result_scores = await instructor_eval(instructor_name, context, dimension, explanation)
-        print(result_responses)
-        print(result_scores)
-        # Extract only the message['content'] part and store it
-        all_responses[dimension] = result_responses[dimension]['message']['content']
-        all_scores[dimension] = result_scores[dimension]
-    
+
+        print(f"Dimension: {dimension}")
+        print(f"Result Responses: {result_responses}")
+        print(f"Result Scores: {result_scores}")
+
+        # Safely access and store the responses and scores
+        if dimension in result_responses:
+            all_responses[dimension] = result_responses[dimension]['message']['content']
+        else:
+            all_responses[dimension] = "No response available"
+
+        if dimension in result_scores:
+            all_scores[dimension] = result_scores[dimension]
+        else:
+            all_scores[dimension] = "No score available"
+
     print("SCORES:")
     print(json.dumps(all_scores, indent=2))
+    
     response = {
         "DOCUMENT": all_responses,
         "SCORES": all_scores
@@ -2029,11 +2144,6 @@ async def resume_eval(resume_name, jd_name, context, score_criterion, explanatio
     scores_dict[score_criterion] = score
 
     return response, scores_dict
-
-
-
-class QueryRequest(BaseModel):
-    query: List[str]
 
 @app.post("/api/evaluate_Resume")
 async def evaluate_Resume(request: QueryRequest):

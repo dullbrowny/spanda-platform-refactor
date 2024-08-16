@@ -1,9 +1,10 @@
 from pydantic import BaseModel
 from goldenverba.components.types import FileData
-
+from typing import List, Optional
 
 class QueryPayload(BaseModel):
     query: str
+    course_id: str = None
 
 
 class ConversationItem(BaseModel):
@@ -51,10 +52,12 @@ class ImportPayload(BaseModel):
 
 class QueryRequest(BaseModel):
     query: str
+    course_id: str = None
 
 class QueryRequestaqg(BaseModel):
     query: str
     NumberOfVariants: int
+    course_id: str = None
 
 class ConfigPayload(BaseModel):
     config: dict
@@ -86,3 +89,16 @@ class Token(BaseModel):
 
 class TokenData(BaseModel):
     username: str
+
+class Course(BaseModel):
+    id: int
+    fullname: str  # Updated field name to match the data
+class RequestAGA(BaseModel):
+    course_shortname : str
+    assignment_name : str
+
+
+class TokenWithRoles(BaseModel):
+    access_token: str
+    token_type: str
+    roles: Optional[List[str]] = None
