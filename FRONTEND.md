@@ -1,6 +1,6 @@
 # Verba - Frontend Documentation
 
-Verba's Frontend is a [NextJS](https://nextjs.org/) application used together with [TailwindCSS](https://tailwindcss.com/) and [DaisyUI](https://daisyui.com/).
+Verba's Frontend is a complete [NextJS](https://nextjs.org/) application used together with [TailwindCSS](https://tailwindcss.com/) and [DaisyUI](https://daisyui.com/).
 
 ## 🚀 Setting Up the Frontend
 
