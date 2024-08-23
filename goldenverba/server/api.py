@@ -87,7 +87,7 @@ SECRET_KEY = os.getenv('SECRET_KEY')
 ALGORITHM = os.getenv('ALGORITHM')
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv('ACCESS_TOKEN_EXPIRE_MINUTES'))
 MOODLE_URL = os.getenv('MOODLE_URL')
-LOGIN_URL = f'{MOODLE_URL}/login/index.php' 
+LOGIN_URL = f'{MOODLE_URL}/login/index.php?altlogin=1' 
 ACCESS_URL = f'{MOODLE_URL}/webservice/rest/server.php'
 TOKEN = os.getenv('TOKEN')
 # Check if runs in production
@@ -107,6 +107,7 @@ app = FastAPI()
 
 origins = [
     "http://localhost:3000",
+    "http://localhost:8080",
     "http://localhost:4000",
     "http://localhost:6000",
     "http://localhost:5000",
@@ -116,7 +117,8 @@ origins = [
     "http://localhost/moodle", 
     "http://localhost", 
     "https://taxila-spanda.wilp-connect.net",
-    "https://bitsmart.vercel.app"
+    "https://bitsmart.vercel.app",
+    "http://host.docker.internal"
 ]
 
 app.add_middleware(
@@ -228,9 +230,9 @@ def authenticate_user(username: str, password: str) -> Optional[dict]:
                         roles_found.append('editingteacher')
                         print("User has 'editingteacher' role in course:", course.get('shortname', 'Unnamed Course'))
                     
-                    if 'manager' in course_roles:
-                        roles_found.append('manager')
-                        print("User has 'manager' role in course:", course.get('shortname', 'Unnamed Course'))
+                    if 'bitsmanager' in course_roles:
+                        roles_found.append('bitsmanager')
+                        print("User has 'bitsmanager' role in course:", course.get('shortname', 'Unnamed Course'))
                         
                 print("Roles found for user:", roles_found)
                 if roles_found:
