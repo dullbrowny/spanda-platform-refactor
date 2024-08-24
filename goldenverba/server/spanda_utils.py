@@ -9,7 +9,7 @@ import json
 import httpx
 import re
 import ollama
-
+import aiohttp
 import os
 from pathlib import Path
 
@@ -34,11 +34,11 @@ from goldenverba.server.util import get_config, set_config, setup_managers
 manager = verba_manager.VerbaManager()
 setup_managers(manager)
 
-
 async def chatbot(query, context):
     user_context = "".join(context)
     instructions = f"""You are an academic assistant chatbot. Your role is to answer questions based solely on the given context. If a question is outside the provided context, politely inform the user that you can only respond to questions within the given context. If someone asks about the chatbot, explain that you are an assistant designed to help users by answering academic and course-oriented questions."""
     payload = {
+        "model": 'llama3.1',
         "messages": [
             {"role": "system", "content": instructions},
             {"role": "user", "content": f"""
@@ -47,13 +47,16 @@ async def chatbot(query, context):
              """
              }
         ],
-        "stream": False,
-        "options": {"top_k": 1, "top_p": 1, "temperature": 0, "seed": 100}
+        "stream": False
+        # "options": {"top_k": 1, "top_p": 1, "temperature": 0, "seed": 100}
     }
+    url = "http://localhost:11434/api/chat"
 
-    response = await asyncio.to_thread(ollama_chat, model='llama3.1', messages=payload['messages'], stream=payload['stream'])
-    print(response['message']['content'])
-    return response['message']['content']
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, json=payload) as response:
+            result = await response.json()
+            print(result["message"]["content"])
+            return result["message"]["content"]
 
 
 
