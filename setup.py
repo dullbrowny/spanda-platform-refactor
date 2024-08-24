@@ -45,7 +45,7 @@ setup(
         "fitz",
         "tools",
         "pytesseract",
-        "jwt",
+        "PyJWT",
         "bs4",
         "python-multipart",
     ],
