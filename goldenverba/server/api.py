@@ -71,16 +71,16 @@ logger = logging.getLogger("API")
 load_dotenv()
 # Replace with your Moodle instance URL and token
 
-current_dir = os.path.dirname(__file__)
+# current_dir = os.path.dirname(__file__)
 
-# Step 2: Move up one directory level to 'goldenverba'
-base_dir = os.path.abspath(os.path.join(current_dir, '..'))
+# # Step 2: Move up one directory level to 'goldenverba'
+# base_dir = os.path.abspath(os.path.join(current_dir, '..'))
 
-# Step 3: Create the relative path to the .env file
-dotenv_path = os.path.join(base_dir, '.env')
+# # Step 3: Create the relative path to the .env file
+# dotenv_path = os.path.join(base_dir, '.env')
 
 # Step 4: Load the .env file
-load_dotenv(dotenv_path)
+# load_dotenv(dotenv_path)
 
 # Now you can access the environment variables
 SECRET_KEY = os.getenv('SECRET_KEY')
@@ -225,10 +225,10 @@ def authenticate_user(username: str, password: str) -> Optional[dict]:
                     course_roles = [role['shortname'] for role in roles]
                     print("Roles found for course:", course.get('shortname', 'Unnamed Course'), course_roles)
                     
-                    if 'editingteacher' in course_roles:
+                    if 'bitseditingteacher' in course_roles:
                         editing_teacher_courses.append(course['shortname'])  # Append only the shortname
-                        roles_found.append('editingteacher')
-                        print("User has 'editingteacher' role in course:", course.get('shortname', 'Unnamed Course'))
+                        roles_found.append('bitseditingteacher')
+                        print("User has 'bitseditingteacher' role in course:", course.get('shortname', 'Unnamed Course'))
                     
                     if 'bitsmanager' in course_roles:
                         roles_found.append('bitsmanager')
@@ -340,7 +340,7 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     auth_data = authenticate_user(form_data.username, form_data.password)
     print("AUTH", auth_data)
     if auth_data is None:
-        raise HTTPException(status_code=401, detail="Invalid username or password")
+        raise HTTPException(status_code=401, detail="No username or password found")
     
     print("Returning access token and roles:", auth_data)
     return {
