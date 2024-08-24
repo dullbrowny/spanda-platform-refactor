@@ -71,23 +71,23 @@ logger = logging.getLogger("API")
 load_dotenv()
 # Replace with your Moodle instance URL and token
 
-current_dir = os.path.dirname(__file__)
+# current_dir = os.path.dirname(__file__)
 
-# Step 2: Move up one directory level to 'goldenverba'
-base_dir = os.path.abspath(os.path.join(current_dir, '..'))
+# # Step 2: Move up one directory level to 'goldenverba'
+# base_dir = os.path.abspath(os.path.join(current_dir, '..'))
 
-# Step 3: Create the relative path to the .env file
-dotenv_path = os.path.join(base_dir, '.env')
+# # Step 3: Create the relative path to the .env file
+# dotenv_path = os.path.join(base_dir, '.env')
 
 # Step 4: Load the .env file
-load_dotenv(dotenv_path)
+# load_dotenv(dotenv_path)
 
 # Now you can access the environment variables
 SECRET_KEY = os.getenv('SECRET_KEY')
 ALGORITHM = os.getenv('ALGORITHM')
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv('ACCESS_TOKEN_EXPIRE_MINUTES'))
 MOODLE_URL = os.getenv('MOODLE_URL')
-LOGIN_URL = f'{MOODLE_URL}/login/index.php' 
+LOGIN_URL = f'{MOODLE_URL}/login/index.php?altlogin=1' 
 ACCESS_URL = f'{MOODLE_URL}/webservice/rest/server.php'
 TOKEN = os.getenv('TOKEN')
 # Check if runs in production
@@ -107,6 +107,7 @@ app = FastAPI()
 
 origins = [
     "http://localhost:3000",
+    "http://localhost:8080",
     "http://localhost:4000",
     "http://localhost:6000",
     "http://localhost:5000",
@@ -116,7 +117,8 @@ origins = [
     "http://localhost/moodle", 
     "http://localhost", 
     "https://taxila-spanda.wilp-connect.net",
-    "https://bitsmart.vercel.app"
+    "https://bitsmart.vercel.app",
+    "http://host.docker.internal"
 ]
 
 app.add_middleware(
@@ -223,14 +225,14 @@ def authenticate_user(username: str, password: str) -> Optional[dict]:
                     course_roles = [role['shortname'] for role in roles]
                     print("Roles found for course:", course.get('shortname', 'Unnamed Course'), course_roles)
                     
-                    if 'editingteacher' in course_roles:
+                    if 'bitseditingteacher' in course_roles:
                         editing_teacher_courses.append(course['shortname'])  # Append only the shortname
-                        roles_found.append('editingteacher')
-                        print("User has 'editingteacher' role in course:", course.get('shortname', 'Unnamed Course'))
+                        roles_found.append('bitseditingteacher')
+                        print("User has 'bitseditingteacher' role in course:", course.get('shortname', 'Unnamed Course'))
                     
-                    if 'manager' in course_roles:
-                        roles_found.append('manager')
-                        print("User has 'manager' role in course:", course.get('shortname', 'Unnamed Course'))
+                    if 'bitsmanager' in course_roles:
+                        roles_found.append('bitsmanager')
+                        print("User has 'bitsmanager' role in course:", course.get('shortname', 'Unnamed Course'))
                         
                 print("Roles found for user:", roles_found)
                 if roles_found:
@@ -338,7 +340,7 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     auth_data = authenticate_user(form_data.username, form_data.password)
     print("AUTH", auth_data)
     if auth_data is None:
-        raise HTTPException(status_code=401, detail="Invalid username or password")
+        raise HTTPException(status_code=401, detail="No username or password found")
     
     print("Returning access token and roles:", auth_data)
     return {
