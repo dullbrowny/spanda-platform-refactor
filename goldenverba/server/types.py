@@ -54,6 +54,10 @@ class QueryRequest(BaseModel):
     query: str
     course_id: str = None
 
+class QueryRequestResume(BaseModel):
+    query: list[str]
+    course_id: str = None
+
 class QueryRequestaqg(BaseModel):
     query: str
     NumberOfVariants: int

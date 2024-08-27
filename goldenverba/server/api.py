@@ -22,7 +22,8 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 from starlette.websockets import WebSocketDisconnect
-from goldenverba.server.types import CourseIDRequest,AuthDetails, Token, TokenData, Course, TokenWithRoles, RequestAGA
+from goldenverba.components.generation.OllamaGenerator import OllamaGenerator
+from goldenverba.server.types import CourseIDRequest,AuthDetails, Token, TokenData, Course, TokenWithRoles, RequestAGA, QueryRequestResume
 from wasabi import msg  # type: ignore[import]
 import time
 import hashlib
@@ -140,7 +141,6 @@ app.mount(
 
 # Serve the main page and other static files
 app.mount("/static", StaticFiles(directory=BASE_DIR / "frontend/out"), name="app")
-
 
 @app.get("/")
 @app.head("/")
@@ -796,116 +796,212 @@ async def make_request(query_user):
 
 
 
-async def grading_assistant(question_answer_pair, context):
-    user_context = "".join(context)
-    rubric_content = f"""Please act as an impartial judge and evaluate the quality of the provided answer which attempts to answer the provided question based on a provided context.
-            You'll be given context, question and answer to submit your reasoning and score for the correctness, comprehensiveness and readability of the answer. 
+# async def grading_assistant(question_answer_pair, context):
+#     user_context = "".join(context)
+#     rubric_content = f"""Please act as an impartial judge and evaluate the quality of the provided answer which attempts to answer the provided question based on a provided context.
+#             You'll be given context, question and answer to submit your reasoning and score for the correctness, comprehensiveness and readability of the answer. 
 
-            Here is the context - 
-            [CONTEXT START]
-            {user_context}. 
-            [CONTEXT START]
+#             Here is the context - 
+#             [CONTEXT START]
+#             {user_context}. 
+#             [CONTEXT START]
 
-            Below is your grading rubric: 
-            - Correctness: If the answer correctly answers the question, below are the details for different scores:
-            - Score 0: the answer is completely incorrect, doesn't mention anything about the question or is completely contrary to the correct answer.
-                - For example, when asked “How to terminate a databricks cluster”, the answer is an empty string, or content that's completely irrelevant, or sorry I don't know the answer.
-            - Score 1: the answer provides some relevance to the question and answers one aspect of the question correctly.
-                - Example:
-                    - Question: How to terminate a databricks cluster
-                    - Answer: Databricks cluster is a cloud-based computing environment that allows users to process big data and run distributed data processing tasks efficiently.
-                    - Or answer:  In the Databricks workspace, navigate to the "Clusters" tab. And then this is a hard question that I need to think more about it
-            - Score 2: the answer mostly answers the question but is missing or hallucinating on one critical aspect.
-                - Example:
-                    - Question: How to terminate a databricks cluster”
-                    - Answer: “In the Databricks workspace, navigate to the "Clusters" tab.
-                    Find the cluster you want to terminate from the list of active clusters.
-                    And then you'll find a button to terminate all clusters at once”
-            - Score 3: the answer correctly answers the question and is not missing any major aspect. In this case, to score correctness 3, the final answer must be correct, final solution for numerical problems is of utmost importance.
-                - Example:
-                    - Question: How to terminate a databricks cluster
-                    - Answer: In the Databricks workspace, navigate to the "Clusters" tab.
-                    Find the cluster you want to terminate from the list of active clusters.
-                    Click on the down-arrow next to the cluster name to open the cluster details.
-                    Click on the "Terminate" button. A confirmation dialog will appear. Click "Terminate" again to confirm the action.”
-            - Comprehensiveness: How comprehensive is the answer, does it fully answer all aspects of the question and provide comprehensive explanation and other necessary information. Below are the details for different scores:
-            - Score 0: typically if the answer is completely incorrect, then the comprehensiveness is also zero.
-            - Score 1: if the answer is correct but too short to fully answer the question, then we can give score 1 for comprehensiveness.
-                - Example:
-                    - Question: How to use databricks API to create a cluster?
-                    - Answer: First, you will need a Databricks access token with the appropriate permissions. You can generate this token through the Databricks UI under the 'User Settings' option. And then (the rest is missing)
-            - Score 2: the answer is correct and roughly answers the main aspects of the question, but it's missing description about details. Or is completely missing details about one minor aspect.
-                - Example:
-                    - Question: How to use databricks API to create a cluster?
-                    - Answer: You will need a Databricks access token with the appropriate permissions. Then you'll need to set up the request URL, then you can make the HTTP Request. Then you can handle the request response.
-                - Example:
-                    - Question: How to use databricks API to create a cluster?
-                    - Answer: You will need a Databricks access token with the appropriate permissions. Then you'll need to set up the request URL, then you can make the HTTP Request. Then you can handle the request response.
-            - Score 3: the answer is correct, and covers all the main aspects of the question
-            - Readability: How readable is the answer, does it have redundant information or incomplete information that hurts the readability of the answer.
-            - Score 0: the answer is completely unreadable, e.g. full of symbols that's hard to read; e.g. keeps repeating the words that it's very hard to understand the meaning of the paragraph. No meaningful information can be extracted from the answer.
-            - Score 1: the answer is slightly readable, there are irrelevant symbols or repeated words, but it can roughly form a meaningful sentence that covers some aspects of the answer.
-                - Example:
-                    - Question: How to use databricks API to create a cluster?
-                    - Answer: You you  you  you  you  you  will need a Databricks access token with the appropriate permissions. And then then you'll need to set up the request URL, then you can make the HTTP Request. Then Then Then Then Then Then Then Then Then
-            - Score 2: the answer is correct and mostly readable, but there is one obvious piece that's affecting the readability (mentioning of irrelevant pieces, repeated words)
-                - Example:
-                    - Question: How to terminate a databricks cluster
-                    - Answer: In the Databricks workspace, navigate to the "Clusters" tab.
-                    Find the cluster you want to terminate from the list of active clusters.
-                    Click on the down-arrow next to the cluster name to open the cluster details.
-                    Click on the "Terminate" button…………………………………..
-                    A confirmation dialog will appear. Click "Terminate" again to confirm the action.
-            - Score 3: the answer is correct and reader friendly, no obvious piece that affect readability.          
-            The format in which you should provide results-
-                Correctness:
-                    -Score
-                    -Explanation of score
-                Readability:
-                    -Score
-                    -Explanation of score
-                Comprehensiveness:
-                    -Score
-                    -Explanation of score
-                            """
+#             Below is your grading rubric: 
+#             - Correctness: If the answer correctly answers the question, below are the details for different scores:
+#             - Score 0: the answer is completely incorrect, doesn't mention anything about the question or is completely contrary to the correct answer.
+#                 - For example, when asked “How to terminate a databricks cluster”, the answer is an empty string, or content that's completely irrelevant, or sorry I don't know the answer.
+#             - Score 1: the answer provides some relevance to the question and answers one aspect of the question correctly.
+#                 - Example:
+#                     - Question: How to terminate a databricks cluster
+#                     - Answer: Databricks cluster is a cloud-based computing environment that allows users to process big data and run distributed data processing tasks efficiently.
+#                     - Or answer:  In the Databricks workspace, navigate to the "Clusters" tab. And then this is a hard question that I need to think more about it
+#             - Score 2: the answer mostly answers the question but is missing or hallucinating on one critical aspect.
+#                 - Example:
+#                     - Question: How to terminate a databricks cluster”
+#                     - Answer: “In the Databricks workspace, navigate to the "Clusters" tab.
+#                     Find the cluster you want to terminate from the list of active clusters.
+#                     And then you'll find a button to terminate all clusters at once”
+#             - Score 3: the answer correctly answers the question and is not missing any major aspect. In this case, to score correctness 3, the final answer must be correct, final solution for numerical problems is of utmost importance.
+#                 - Example:
+#                     - Question: How to terminate a databricks cluster
+#                     - Answer: In the Databricks workspace, navigate to the "Clusters" tab.
+#                     Find the cluster you want to terminate from the list of active clusters.
+#                     Click on the down-arrow next to the cluster name to open the cluster details.
+#                     Click on the "Terminate" button. A confirmation dialog will appear. Click "Terminate" again to confirm the action.”
+#             - Comprehensiveness: How comprehensive is the answer, does it fully answer all aspects of the question and provide comprehensive explanation and other necessary information. Below are the details for different scores:
+#             - Score 0: typically if the answer is completely incorrect, then the comprehensiveness is also zero.
+#             - Score 1: if the answer is correct but too short to fully answer the question, then we can give score 1 for comprehensiveness.
+#                 - Example:
+#                     - Question: How to use databricks API to create a cluster?
+#                     - Answer: First, you will need a Databricks access token with the appropriate permissions. You can generate this token through the Databricks UI under the 'User Settings' option. And then (the rest is missing)
+#             - Score 2: the answer is correct and roughly answers the main aspects of the question, but it's missing description about details. Or is completely missing details about one minor aspect.
+#                 - Example:
+#                     - Question: How to use databricks API to create a cluster?
+#                     - Answer: You will need a Databricks access token with the appropriate permissions. Then you'll need to set up the request URL, then you can make the HTTP Request. Then you can handle the request response.
+#                 - Example:
+#                     - Question: How to use databricks API to create a cluster?
+#                     - Answer: You will need a Databricks access token with the appropriate permissions. Then you'll need to set up the request URL, then you can make the HTTP Request. Then you can handle the request response.
+#             - Score 3: the answer is correct, and covers all the main aspects of the question
+#             - Readability: How readable is the answer, does it have redundant information or incomplete information that hurts the readability of the answer.
+#             - Score 0: the answer is completely unreadable, e.g. full of symbols that's hard to read; e.g. keeps repeating the words that it's very hard to understand the meaning of the paragraph. No meaningful information can be extracted from the answer.
+#             - Score 1: the answer is slightly readable, there are irrelevant symbols or repeated words, but it can roughly form a meaningful sentence that covers some aspects of the answer.
+#                 - Example:
+#                     - Question: How to use databricks API to create a cluster?
+#                     - Answer: You you  you  you  you  you  will need a Databricks access token with the appropriate permissions. And then then you'll need to set up the request URL, then you can make the HTTP Request. Then Then Then Then Then Then Then Then Then
+#             - Score 2: the answer is correct and mostly readable, but there is one obvious piece that's affecting the readability (mentioning of irrelevant pieces, repeated words)
+#                 - Example:
+#                     - Question: How to terminate a databricks cluster
+#                     - Answer: In the Databricks workspace, navigate to the "Clusters" tab.
+#                     Find the cluster you want to terminate from the list of active clusters.
+#                     Click on the down-arrow next to the cluster name to open the cluster details.
+#                     Click on the "Terminate" button…………………………………..
+#                     A confirmation dialog will appear. Click "Terminate" again to confirm the action.
+#             - Score 3: the answer is correct and reader friendly, no obvious piece that affect readability.          
+#             The format in which you should provide results-
+#                 Correctness:
+#                     -Score
+#                     -Explanation of score
+#                 Readability:
+#                     -Score
+#                     -Explanation of score
+#                 Comprehensiveness:
+#                     -Score
+#                     -Explanation of score
+#                             """
     
-    payload = {
-        "messages": [
-            {"role": "system", "content": rubric_content},
-            {"role": "user", "content": f"""Grade the following question-answer pair using the grading rubric and context provided - {question_answer_pair}"""}
-        ],
-        "stream": False,
-        "options": {"top_k": 1, "top_p": 1, "temperature": 0, "seed": 100}
-    }
+#     payload = {
+#         "messages": [
+#             {"role": "system", "content": rubric_content},
+#             {"role": "user", "content": f"""Grade the following question-answer pair using the grading rubric and context provided - {question_answer_pair}"""}
+#         ],
+#         "stream": False,
+#         "options": {"top_k": 1, "top_p": 1, "temperature": 0, "seed": 100}
+#     }
 
-    response = await asyncio.to_thread(ollama_chat, model='llama3.1', messages=payload['messages'], stream=payload['stream'])
+#     response = await asyncio.to_thread(ollama_chat, model='llama3.1', messages=payload['messages'], stream=payload['stream'])
     
-    # Define a dictionary to store extracted scores
-    scores_dict = {}
+#     # Define a dictionary to store extracted scores
+#     scores_dict = {}
 
-    # Extract the response content
-    response_content = response['message']['content']
+#     # Extract the response content
+#     response_content = response['message']['content']
 
-    # Define the criteria
-    criteria = ["Correctness", "Readability", "Comprehensiveness"]
+#     # Define the criteria
+#     criteria = ["Correctness", "Readability", "Comprehensiveness"]
 
-    # List to store individual scores
-    scores = []
+#     # List to store individual scores
+#     scores = []
 
-    for criterion in criteria:
-        # Use regular expression to search for the criterion followed by 'Score:'
-        criterion_pattern = re.compile(rf'{criterion}:\s*\**\s*Score\s*(\d+)', re.IGNORECASE)
-        match = criterion_pattern.search(response_content)
-        if match:
-            # Extract the score value
-            score_value = int(match.group(1).strip())
-            scores.append(score_value)
+#     for criterion in criteria:
+#         # Use regular expression to search for the criterion followed by 'Score:'
+#         criterion_pattern = re.compile(rf'{criterion}:\s*\**\s*Score\s*(\d+)', re.IGNORECASE)
+#         match = criterion_pattern.search(response_content)
+#         if match:
+#             # Extract the score value
+#             score_value = int(match.group(1).strip())
+#             scores.append(score_value)
 
-    # Calculate the average score if we have scores
-    avg_score = sum(scores) / len(scores) if scores else 0
-    print(response['message']['content'])
-    return response['message']['content'], avg_score
+#     # Calculate the average score if we have scores
+#     avg_score = sum(scores) / len(scores) if scores else 0
+#     print(response['message']['content'])
+#     return response['message']['content'], avg_score
 
+
+# async def instructor_eval(instructor_name, context, score_criterion, explanation):
+#     # Ensure score_criterion is hashable by converting it to a string if necessary
+#     score_criterion = str(score_criterion)
+
+#     # Define the criterion to evaluate
+#     user_context = "".join(context)
+
+#     # Initialize empty dictionaries to store relevant responses and scores
+#     responses = {}
+#     scores_dict = {}
+
+#     # Evaluation prompt template
+#     evaluate_instructions = f"""
+#         -Instructions:
+#             You are tasked with evaluating a teacher's performance based on the criterion: {score_criterion} - {explanation}.
+
+#         -Evaluation Details:
+#             -Focus exclusively on the provided video transcript.
+#             -Ignore interruptions from student entries/exits and notifications of participants 'joining' or 'leaving' the meeting.
+#             -Assign scores from 1 to 5:
+#         -Criteria:
+#             -Criterion Explanation: {explanation}
+#             -If the transcript lacks sufficient information to judge {score_criterion}, mark it as N/A and provide a clear explanation.
+#             -Justify any score that is not a perfect 5.
+#             -Consider the context surrounding the example statements, as the context in which a statement is made is extremely important.
+
+#             Rate strictly on a scale of 1 to 5 using whole numbers only.
+
+#             Ensure the examples are directly relevant to the evaluation criterion and discard any irrelevant excerpts.
+#     """
+
+#     output_format = f"""Strictly follow the output format-
+#         -Output Format:
+#             -{score_criterion}: Score(range of 1 to 5, or N/A) - note: Do not use bold or italics or any formatting in this line.
+
+#             -Detailed Explanation with Examples and justification for examples:
+#                 -Example 1: "[Quoted text from transcript]" [Description] [Timestamp]
+#                 -Example 2: "[Quoted text from transcript]" [Description] [Timestamp]
+#                 -Example 3: "[Quoted text from transcript]" [Description] [Timestamp]
+#                 -...
+#                 -Example n: "[Quoted text from transcript]" [Description] [Timestamp]
+#             -Include both positive and negative instances.
+#             -Highlight poor examples if the score is not ideal."""
+    
+#     system_message = """You are a judge. The judge gives helpful, detailed, and polite suggestions for improvement for a particular teacher from the given context - the context contains transcripts of videos. The judge should also indicate when the judgment can be found in the context."""
+    
+#     formatted_transcripts = f"""Here are the transcripts for {instructor_name}-   
+#                     [TRANSCRIPT START]
+#                     {user_context}
+#                     [TRANSCRIPT END]"""
+    
+#     user_prompt = f"""Please provide an evaluation of the teacher named '{instructor_name}' on the following criteria: '{score_criterion}'. Only include information from transcripts where '{instructor_name}' is the instructor."""
+
+#     # Define the payload
+#     payload = {
+#         "messages": [
+#             {
+#                 "role": "system",
+#                 "content": system_message
+#             },
+#             {
+#                 "role": "user",
+#                 "content": formatted_transcripts + "/n/n" + evaluate_instructions + "/n/n" + user_prompt + "/n/n" + output_format
+#             }
+#         ],
+#         "stream": False,
+#         "options": {
+#             "top_k": 1, 
+#             "top_p": 1, 
+#             "temperature": 0, 
+#             "seed": 100
+#         }
+#     }
+
+
+#     # Asynchronous call to the LLM API
+#     response = await asyncio.to_thread(ollama.chat, model='llama3.1', messages=payload['messages'], stream=payload['stream'])
+
+
+#     # Store the response
+#     content = response['message']['content']
+
+#     # Extract the score from the response content
+#     pattern = rf'(?i)(score:\s*(\d+)|\**{re.escape(score_criterion)}\**\s*[:\-]?\s*(\d+))'
+#     match = re.search(pattern, content, re.IGNORECASE)
+
+#     if match:
+#         # Check which group matched and extract the score
+#         score_value = match.group(2).strip() if match.group(2) else match.group(3).strip()
+#         scores_dict[score_criterion] = score_value
+#     else:
+#         scores_dict[score_criterion] = "N/A"
+
+#     # Return only the relevant content without any metadata
+#     return {"content": content}, scores_dict
 
 async def instructor_eval(instructor_name, context, score_criterion, explanation):
     # Ensure score_criterion is hashable by converting it to a string if necessary
@@ -960,32 +1056,24 @@ async def instructor_eval(instructor_name, context, score_criterion, explanation
     
     user_prompt = f"""Please provide an evaluation of the teacher named '{instructor_name}' on the following criteria: '{score_criterion}'. Only include information from transcripts where '{instructor_name}' is the instructor."""
 
-    # Define the payload
-    payload = {
-        "messages": [
-            {
-                "role": "system",
-                "content": system_message
-            },
-            {
-                "role": "user",
-                "content": formatted_transcripts + "/n/n" + evaluate_instructions + "/n/n" + user_prompt + "/n/n" + output_format
-            }
-        ],
-        "stream": False,
-        "options": {
-            "top_k": 1, 
-            "top_p": 1, 
-            "temperature": 0, 
-            "seed": 100
-        }
-    }
-
-    # Asynchronous call to the LLM API
-    response = await asyncio.to_thread(ollama.chat, model='llama3.1', messages=payload['messages'], stream=payload['stream'])
-
+    afe_new_system_prompt = (
+        f""" 
+        {system_message}
+        """
+    )
+    afe_new_user_prompt = (
+        f"""
+        {formatted_transcripts} + "/n/n" + {evaluate_instructions} + "/n/n" + {user_prompt} + "/n/n" + {output_format}
+        """
+    )
+    # Correct request creation
+    request_obj = QueryRequest(query=instructor_name)  # Adjust to the correct instantiation if necessary
+    
+    # Generate the response using the utility function
+    full_text = await generate_response(request_obj, context, afe_new_system_prompt, afe_new_user_prompt)
+    
     # Store the response
-    content = response['message']['content']
+    content = full_text
 
     # Extract the score from the response content
     pattern = rf'(?i)(score:\s*(\d+)|\**{re.escape(score_criterion)}\**\s*[:\-]?\s*(\d+))'
@@ -1002,11 +1090,102 @@ async def instructor_eval(instructor_name, context, score_criterion, explanation
     return {"content": content}, scores_dict
 
 
-# Function to generate answer using the Ollama API
-async def answer_gen(question, context):
-    user_context = "".join(context)
-    # One shot example given in answer_inst should be the original question + original answer.
-    answer_inst = f"""
+# we dont need this
+# async def answer_gen(question, context):
+#     user_context = "".join(context)
+#     # One shot example given in answer_inst should be the original question + original answer.
+#     answer_inst = f"""
+#         ### Context:
+#         Ensure that each generated answer is relevant to the following context:
+
+#         **[CONTEXT START]**
+#         {context}
+#         **[CONTEXT END]**
+
+#         ## Answer Instructions
+
+#         You are a highly knowledgeable and detailed assistant. Please follow these guidelines when generating answers:
+
+#         ### 1. Format
+#         Ensure the answer is nicely formatted and visually appealing. Use:
+#         - Bullet points
+#         - Numbered lists
+#         - Headings
+#         - Subheadings where appropriate
+
+#         ### 2. Clarity
+#         Provide clear and concise explanations. Avoid jargon unless it is necessary, and explain it when used.
+
+#         ### 3. Math Questions
+#         - Include all steps in the solution process.
+#         - Use a clear and logical progression from one step to the next.
+#         - Explain each step briefly to ensure understanding.
+#         - Use LaTeX formatting for mathematical expressions to ensure they are easy to read and understand.
+
+#         ### 4. Non-Math Questions
+#         - Provide detailed explanations and context.
+#         - Break down complex ideas into simpler parts.
+#         - Use examples where appropriate to illustrate points.
+#         - Ensure the answer is comprehensive and addresses all parts of the question.
+
+#         ### 5. Tone
+#         Maintain a professional and friendly tone. Aim to be helpful and approachable.
+
+#         ### Example
+#         Here are a couple of examples to illustrate the format:
+#         ONE-SHOT-EXAMPLE-GOES-HERE"""
+    
+#     user_prompt = f"""Please answer the following question - {question}"""
+
+#     payload = {
+#         "messages": [
+#             {
+#                 "role": "system",
+#                 "content": answer_inst
+#             },
+#             {
+#                 "role": "user",
+#                 "content": f"""Query: {user_prompt}"""
+#             }
+#         ],
+#         "stream": False,
+#         "options": {
+#             "top_k": 20,
+#             "top_p": 0.5,
+#             "temperature": 0.5,
+#             "seed": 100
+#         }
+#     }
+
+#     # Call ollama_chat function in a separate thread
+#     response = await asyncio.to_thread(ollama.chat, model='llama3.1', messages=payload['messages'], stream=payload['stream'])
+#     answer = response['message']['content']   
+
+#     return answer
+
+# # Define the endpoint
+# @app.post("/api/answergen")
+# async def answergen_ollama(request: QueryRequest):
+#     query = request.query
+#     context = await make_request(query)
+#     if context is None:
+#         raise HTTPException(status_code=500, detail="Failed to fetch context")
+    
+#     answer = await answer_gen(query, context)
+#     response = {
+#         "answer": answer
+#     }
+#     return response
+
+# Define the endpoint
+@app.post("/api/answergen")
+async def answergen_ollama(request: QueryRequest):
+    query = request.query
+    context = await make_request(query)
+    if context is None:
+        raise HTTPException(status_code=500, detail="Failed to fetch context")
+    # Example custom prompts
+    answergen_system_prompt = (f"""
         ### Context:
         Ensure that each generated answer is relevant to the following context:
 
@@ -1046,183 +1225,152 @@ async def answer_gen(question, context):
         ### Example
         Here are a couple of examples to illustrate the format:
         ONE-SHOT-EXAMPLE-GOES-HERE"""
-    
-    user_prompt = f"""Please answer the following question - {question}"""
-
-    payload = {
-        "messages": [
-            {
-                "role": "system",
-                "content": answer_inst
-            },
-            {
-                "role": "user",
-                "content": f"""Query: {user_prompt}"""
-            }
-        ],
-        "stream": False,
-        "options": {
-            "top_k": 20,
-            "top_p": 0.5,
-            "temperature": 0.5,
-            "seed": 100
-        }
-    }
-
-    # Call ollama_chat function in a separate thread
-    response = await asyncio.to_thread(ollama.chat, model='llama3.1', messages=payload['messages'], stream=payload['stream'])
-    answer = response['message']['content']   
-
-    return answer
-
-# Define the endpoint
-@app.post("/api/answergen")
-async def answergen_ollama(request: QueryRequest):
-    query = request.query
-    context = await make_request(query)
-    if context is None:
-        raise HTTPException(status_code=500, detail="Failed to fetch context")
-    
-    answer = await answer_gen(query, context)
+    )
+    answergen_user_prompt = (
+    f"""Please answer the following question - {query}"""
+    )
+    # Generate the response using the utility function
+    full_text = await generate_response(request, context, answergen_system_prompt, answergen_user_prompt)
     response = {
-        "answer": answer
-    }
+        "answer": full_text
+    }    
     return response
 
+# # we do not need this
+# async def generate_question_variants(base_question, n, context):
+#     # Join the context into a single string
+#     user_context = "".join(context)
 
-async def generate_question_variants(base_question, n, context):
-    # Join the context into a single string
-    user_context = "".join(context)
+#     base_question_gen = f"""
+#         **Task: Design a Variety of Mathematical and Conceptual Problem Scenarios**
 
-    base_question_gen = f"""
-        **Task: Design a Variety of Mathematical and Conceptual Problem Scenarios**
+#         ### Background:
+#         You are tasked with creating a set of unique problem scenarios based on the following context:
 
-        ### Background:
-        You are tasked with creating a set of unique problem scenarios based on the following context:
+#         **[CONTEXT START]**  
+#         {context}  
+#         **[CONTEXT END]**
 
-        **[CONTEXT START]**  
-        {context}  
-        **[CONTEXT END]**
+#         Your objective is to generate distinct variations of a core problem by creatively altering its numerical, conceptual, and contextual elements. Each scenario should challenge students to apply diverse problem-solving strategies and think critically about the concepts involved.
 
-        Your objective is to generate distinct variations of a core problem by creatively altering its numerical, conceptual, and contextual elements. Each scenario should challenge students to apply diverse problem-solving strategies and think critically about the concepts involved.
+#         ### Creation Guidelines:
 
-        ### Creation Guidelines:
+#         1. **Diversify Numerical Elements**: Transform the numerical aspects of the problem, such as changing quantities, constants, or measurements. These alterations should introduce new dimensions to the problem, encouraging varied computational approaches.
 
-        1. **Diversify Numerical Elements**: Transform the numerical aspects of the problem, such as changing quantities, constants, or measurements. These alterations should introduce new dimensions to the problem, encouraging varied computational approaches.
+#         2. **Reinvent Problem Conditions**: Adjust or replace conditions within the problem, such as shifting the relationships between variables, altering assumptions, or imposing new constraints. These modifications should lead to different methods of solution and analysis.
 
-        2. **Reinvent Problem Conditions**: Adjust or replace conditions within the problem, such as shifting the relationships between variables, altering assumptions, or imposing new constraints. These modifications should lead to different methods of solution and analysis.
+#         3. **Introduce Novel Variables**: Add, remove, or substitute variables to change the nature of the problem. For example, altering the number of components in a sequence or changing the type of equation can lead to entirely different problem-solving paths.
 
-        3. **Introduce Novel Variables**: Add, remove, or substitute variables to change the nature of the problem. For example, altering the number of components in a sequence or changing the type of equation can lead to entirely different problem-solving paths.
+#         4. **Change the Setting or Application**: Place the problem in a new context or application, such as using different real-world scenarios or shifting the problem’s focus to another field (e.g., from physics to economics). This approach helps students see the problem from various perspectives and understand its broader relevance.
 
-        4. **Change the Setting or Application**: Place the problem in a new context or application, such as using different real-world scenarios or shifting the problem’s focus to another field (e.g., from physics to economics). This approach helps students see the problem from various perspectives and understand its broader relevance.
+#         5. **Redesign the Problem Statement**: Reword the problem to emphasize different theoretical aspects, such as shifting focus from procedure to concept or from application to theory. This encourages students to explore different dimensions of the same problem.
 
-        5. **Redesign the Problem Statement**: Reword the problem to emphasize different theoretical aspects, such as shifting focus from procedure to concept or from application to theory. This encourages students to explore different dimensions of the same problem.
+#         6. **Combine or Fragment Concepts**: Either merge multiple concepts into a single complex problem or break down a problem into simpler, interrelated parts. This approach encourages deeper understanding and the ability to connect disparate ideas.
 
-        6. **Combine or Fragment Concepts**: Either merge multiple concepts into a single complex problem or break down a problem into simpler, interrelated parts. This approach encourages deeper understanding and the ability to connect disparate ideas.
+#         7. **Engage with Current Developments**: Integrate contemporary trends or recent discoveries related to the problem’s context, making the scenario more engaging and relevant for students.
 
-        7. **Engage with Current Developments**: Integrate contemporary trends or recent discoveries related to the problem’s context, making the scenario more engaging and relevant for students.
+#         ### Multi-Part Problem Design:
 
-        ### Multi-Part Problem Design:
+#         1. **Consistency Across Parts**: Ensure that if the original problem is multi-part, the variations retain the same structure. Each part of the variant should correspond to the original, with appropriate changes to ensure uniqueness.
 
-        1. **Consistency Across Parts**: Ensure that if the original problem is multi-part, the variations retain the same structure. Each part of the variant should correspond to the original, with appropriate changes to ensure uniqueness.
+#         2. **Layered Challenges**: Within each multi-part variant, introduce different layers of complexity by altering the relationships between parts. Ensure that each part adds depth to the overall problem.
 
-        2. **Layered Challenges**: Within each multi-part variant, introduce different layers of complexity by altering the relationships between parts. Ensure that each part adds depth to the overall problem.
+#         3. **Encourage Exploration**: Design each part to explore different aspects of the problem, pushing students to use a variety of techniques and perspectives to arrive at solutions.
 
-        3. **Encourage Exploration**: Design each part to explore different aspects of the problem, pushing students to use a variety of techniques and perspectives to arrive at solutions.
+#         ### Problem Complexity:
 
-        ### Problem Complexity:
+#         1. **Standalone Scenarios**: Ensure each problem is self-contained, providing enough information and complexity to stand on its own without reference to other problems.
 
-        1. **Standalone Scenarios**: Ensure each problem is self-contained, providing enough information and complexity to stand on its own without reference to other problems.
+#         2. **Promote Analytical Thinking**: Create problems that require deep thought and analysis, moving beyond simple calculations to engage students in understanding and application.
 
-        2. **Promote Analytical Thinking**: Create problems that require deep thought and analysis, moving beyond simple calculations to engage students in understanding and application.
+#         3. **Diverse Problem-Solving Approaches**: Design scenarios that encourage students to explore multiple methods of solving the problem, fostering creativity and flexibility in thinking.
 
-        3. **Diverse Problem-Solving Approaches**: Design scenarios that encourage students to explore multiple methods of solving the problem, fostering creativity and flexibility in thinking.
-
-        ### Essential Considerations:
-        - **Complete Transformation**: Each scenario must differ significantly in numbers, conditions, and theoretical focus to provide a wide range of challenges.
-        - **Independent Design**: Each problem variant should be independent, not relying on others for context or information.
-        - **Variety and Depth**: Ensure a broad spectrum of challenges to stimulate critical thinking and in-depth analysis.
-        - **Structural Integrity**: In multi-part problems, maintain the original structure while ensuring each variant part is thoughtfully designed and distinct.
-        - **DO NOT INCLUDE ANSWERS OR SOLUTIONS**
+#         ### Essential Considerations:
+#         - **Complete Transformation**: Each scenario must differ significantly in numbers, conditions, and theoretical focus to provide a wide range of challenges.
+#         - **Independent Design**: Each problem variant should be independent, not relying on others for context or information.
+#         - **Variety and Depth**: Ensure a broad spectrum of challenges to stimulate critical thinking and in-depth analysis.
+#         - **Structural Integrity**: In multi-part problems, maintain the original structure while ensuring each variant part is thoughtfully designed and distinct.
+#         - **DO NOT INCLUDE ANSWERS OR SOLUTIONS**
                                 
-        ### Example 1: Single-Part Question with 3 Variants
+#         ### Example 1: Single-Part Question with 3 Variants
 
-        **Original Question:**
-        *Question:* A sample of gas occupies 4 liters at a pressure of 2 atm and a temperature of 300 K. Calculate the number of moles of gas in the sample using the ideal gas law.
+#         **Original Question:**
+#         *Question:* A sample of gas occupies 4 liters at a pressure of 2 atm and a temperature of 300 K. Calculate the number of moles of gas in the sample using the ideal gas law.
         
-        Response-
+#         Response-
 
-        Spanda
-        **Variant 1**:  
-        a. A sample of gas occupies 6 liters at a pressure of 1.5 atm and a temperature of 310 K. Calculate the number of moles of gas in the sample using the ideal gas law.
+#         Spanda
+#         **Variant 1**:  
+#         a. A sample of gas occupies 6 liters at a pressure of 1.5 atm and a temperature of 310 K. Calculate the number of moles of gas in the sample using the ideal gas law.
         
-        Spanda
-        **Variant 2**:  
-        a. A sample of gas occupies 3 liters at a pressure of 2.5 atm and a temperature of 280 K. Calculate the number of moles of gas in the sample using the ideal gas law.
+#         Spanda
+#         **Variant 2**:  
+#         a. A sample of gas occupies 3 liters at a pressure of 2.5 atm and a temperature of 280 K. Calculate the number of moles of gas in the sample using the ideal gas law.
         
-        Spanda
-        **Variant 3**:  
-        a. A sample of gas occupies 5 liters at a pressure of 1 atm and a temperature of 350 K. Calculate the number of moles of gas in the sample using the ideal gas law.
+#         Spanda
+#         **Variant 3**:  
+#         a. A sample of gas occupies 5 liters at a pressure of 1 atm and a temperature of 350 K. Calculate the number of moles of gas in the sample using the ideal gas law.
 
-        ### Example 2: Multi-Part Question with 2 Variants
+#         ### Example 2: Multi-Part Question with 2 Variants
 
-        **Original Question:**
-        *Question:*  
-        a. Find the roots of the quadratic equation \(x^2 - 4x + 3 = 0\).  
-        b. Determine the coordinates of the vertex of the parabola described by the equation \(y = x^2 - 4x + 3\).  
-        c. Calculate the axis of symmetry for the parabola.
+#         **Original Question:**
+#         *Question:*  
+#         a. Find the roots of the quadratic equation \(x^2 - 4x + 3 = 0\).  
+#         b. Determine the coordinates of the vertex of the parabola described by the equation \(y = x^2 - 4x + 3\).  
+#         c. Calculate the axis of symmetry for the parabola.
         
-        Response -
+#         Response -
         
-        Spanda
-        **Variant 1**:  
-        a. Find the roots of the quadratic equation \(x^2 - 6x + 8 = 0\).  
-        b. Determine the coordinates of the vertex of the parabola described by the equation \(y = x^2 - 6x + 8\).  
-        c. Calculate the axis of symmetry for the parabola.
+#         Spanda
+#         **Variant 1**:  
+#         a. Find the roots of the quadratic equation \(x^2 - 6x + 8 = 0\).  
+#         b. Determine the coordinates of the vertex of the parabola described by the equation \(y = x^2 - 6x + 8\).  
+#         c. Calculate the axis of symmetry for the parabola.
 
-        Spanda
-        **Variant 2**:  
-        a. Find the roots of the quadratic equation \(2x^2 - 8x + 6 = 0\).  
-        b. Determine the coordinates of the vertex of the parabola described by the equation \(y = 2x^2 - 8x + 6\).  
-        c. Calculate the axis of symmetry for the parabola.
+#         Spanda
+#         **Variant 2**:  
+#         a. Find the roots of the quadratic equation \(2x^2 - 8x + 6 = 0\).  
+#         b. Determine the coordinates of the vertex of the parabola described by the equation \(y = 2x^2 - 8x + 6\).  
+#         c. Calculate the axis of symmetry for the parabola.
 
-        Utilize these guidelines to generate distinct and engaging questions based on the given context.
-    """
-
-
-    # Define the payload for Ollama
-    payload = {
-        "messages": [
-            {
-                "role": "system",
-                "content": f"""{base_question_gen}"""
-            },
-            {
-                "role": "user",
-                "content": f"""Please generate {n} variants of the question: '{base_question}'.
-
-                In multi-part problems, maintain the original structure while ensuring each variant part is thoughtfully designed and distinct. Type 'Spanda' before the beggining of every variant. Make sure to add 'Spanda' before every variant, its important.
-                """,
-            }
-        ],
-        "stream": False,
-        "options": {
-            "top_k": 20, 
-            "top_p": 0.7, 
-            "temperature": 0.7, 
-            # "seed": 100, 
-        }
-    }
-    # print("Original question" + base_question)
-    # Asynchronous call to Ollama API
-    response = await asyncio.to_thread(ollama.chat, model='llama3.1', messages=payload['messages'], stream=payload['stream'])
-    content = response['message']['content']
-    # print("Response-" + content)
-    variants_dict = extract_variants(base_question, content)
-    # Return the response content
-    return response['message']['content'], variants_dict
+#         Utilize these guidelines to generate distinct and engaging questions based on the given context.
+#     """
 
 
+#     # Define the payload for Ollama
+#     payload = {
+#         "messages": [
+#             {
+#                 "role": "system",
+#                 "content": f"""{base_question_gen}"""
+#             },
+#             {
+#                 "role": "user",
+#                 "content": f"""Please generate {n} variants of the question: '{base_question}'.
+
+#                 In multi-part problems, maintain the original structure while ensuring each variant part is thoughtfully designed and distinct. Type 'Spanda' before the beggining of every variant. Make sure to add 'Spanda' before every variant, its important.
+#                 """,
+#             }
+#         ],
+#         "stream": False,
+#         "options": {
+#             "top_k": 20, 
+#             "top_p": 0.7, 
+#             "temperature": 0.7, 
+#             # "seed": 100, 
+#         }
+#     }
+#     # print("Original question" + base_question)
+#     # Asynchronous call to Ollama API
+#     response = await asyncio.to_thread(ollama.chat, model='llama3.1', messages=payload['messages'], stream=payload['stream'])
+#     content = response['message']['content']
+#     # print("Response-" + content)
+#     variants_dict = extract_variants(base_question, content)
+#     # Return the response content
+#     return response['message']['content'], variants_dict
+
+
+# we need this
 def extract_variants(base_question, content):
     # Regex pattern to capture everything after "Spanda" and before the next "Spanda" or the end of the content
     variant_pattern = re.compile(r'(Spanda.*?)(?=Spanda|\Z)', re.DOTALL)
@@ -1723,75 +1871,598 @@ async def grade_assignment(request: RequestAGA, token: str = Depends(oauth2_sche
     
 @app.post("/api/ollamaAGA")
 async def ollama_aga(request: QueryRequest):
-    context = await make_request(request.query)
-    if context is None:
-        raise Exception("Failed to fetch context")
-    
-    variants, avg_score = await grading_assistant(request.query, context)
-    
-    response = {
-        "justification": variants,
-        "average_score": avg_score
-    }
-    
-    return response
-
-@app.post("/api/ollamaAGA2")
-async def ollama_aga2(request: QueryRequest, current_user: TokenData = Depends(get_current_user)):
+    # Extract context
     context = await make_request(request.query)
     if context is None:
         raise HTTPException(status_code=500, detail="Failed to fetch context")
+    # Example custom prompts
+    aga_system_prompt = (
+        f"""Please act as an impartial judge and evaluate the quality of the provided answer which attempts to answer the provided question based on a provided context.
+            You'll be given context, question and answer to submit your reasoning and score for the correctness, comprehensiveness and readability of the answer. 
+
+            Below is your grading rubric: 
+            - Correctness: If the answer correctly answers the question, below are the details for different scores:
+            - Score 0: the answer is completely incorrect, doesn't mention anything about the question or is completely contrary to the correct answer.
+                - For example, when asked “How to terminate a databricks cluster”, the answer is an empty string, or content that's completely irrelevant, or sorry I don't know the answer.
+            - Score 1: the answer provides some relevance to the question and answers one aspect of the question correctly.
+                - Example:
+                    - Question: How to terminate a databricks cluster
+                    - Answer: Databricks cluster is a cloud-based computing environment that allows users to process big data and run distributed data processing tasks efficiently.
+                    - Or answer:  In the Databricks workspace, navigate to the "Clusters" tab. And then this is a hard question that I need to think more about it
+            - Score 2: the answer mostly answers the question but is missing or hallucinating on one critical aspect.
+                - Example:
+                    - Question: How to terminate a databricks cluster”
+                    - Answer: “In the Databricks workspace, navigate to the "Clusters" tab.
+                    Find the cluster you want to terminate from the list of active clusters.
+                    And then you'll find a button to terminate all clusters at once”
+            - Score 3: the answer correctly answers the question and is not missing any major aspect. In this case, to score correctness 3, the final answer must be correct, final solution for numerical problems is of utmost importance.
+                - Example:
+                    - Question: How to terminate a databricks cluster
+                    - Answer: In the Databricks workspace, navigate to the "Clusters" tab.
+                    Find the cluster you want to terminate from the list of active clusters.
+                    Click on the down-arrow next to the cluster name to open the cluster details.
+                    Click on the "Terminate" button. A confirmation dialog will appear. Click "Terminate" again to confirm the action.”
+            - Comprehensiveness: How comprehensive is the answer, does it fully answer all aspects of the question and provide comprehensive explanation and other necessary information. Below are the details for different scores:
+            - Score 0: typically if the answer is completely incorrect, then the comprehensiveness is also zero.
+            - Score 1: if the answer is correct but too short to fully answer the question, then we can give score 1 for comprehensiveness.
+                - Example:
+                    - Question: How to use databricks API to create a cluster?
+                    - Answer: First, you will need a Databricks access token with the appropriate permissions. You can generate this token through the Databricks UI under the 'User Settings' option. And then (the rest is missing)
+            - Score 2: the answer is correct and roughly answers the main aspects of the question, but it's missing description about details. Or is completely missing details about one minor aspect.
+                - Example:
+                    - Question: How to use databricks API to create a cluster?
+                    - Answer: You will need a Databricks access token with the appropriate permissions. Then you'll need to set up the request URL, then you can make the HTTP Request. Then you can handle the request response.
+                - Example:
+                    - Question: How to use databricks API to create a cluster?
+                    - Answer: You will need a Databricks access token with the appropriate permissions. Then you'll need to set up the request URL, then you can make the HTTP Request. Then you can handle the request response.
+            - Score 3: the answer is correct, and covers all the main aspects of the question
+            - Readability: How readable is the answer, does it have redundant information or incomplete information that hurts the readability of the answer.
+            - Score 0: the answer is completely unreadable, e.g. full of symbols that's hard to read; e.g. keeps repeating the words that it's very hard to understand the meaning of the paragraph. No meaningful information can be extracted from the answer.
+            - Score 1: the answer is slightly readable, there are irrelevant symbols or repeated words, but it can roughly form a meaningful sentence that covers some aspects of the answer.
+                - Example:
+                    - Question: How to use databricks API to create a cluster?
+                    - Answer: You you  you  you  you  you  will need a Databricks access token with the appropriate permissions. And then then you'll need to set up the request URL, then you can make the HTTP Request. Then Then Then Then Then Then Then Then Then
+            - Score 2: the answer is correct and mostly readable, but there is one obvious piece that's affecting the readability (mentioning of irrelevant pieces, repeated words)
+                - Example:
+                    - Question: How to terminate a databricks cluster
+                    - Answer: In the Databricks workspace, navigate to the "Clusters" tab.
+                    Find the cluster you want to terminate from the list of active clusters.
+                    Click on the down-arrow next to the cluster name to open the cluster details.
+                    Click on the "Terminate" button…………………………………..
+                    A confirmation dialog will appear. Click "Terminate" again to confirm the action.
+            - Score 3: the answer is correct and reader friendly, no obvious piece that affect readability.          
+            The format in which you should provide results-
+                Correctness:
+                    -Score
+                    -Explanation of score
+                Readability:
+                    -Score
+                    -Explanation of score
+                Comprehensiveness:
+                    -Score
+                    -Explanation of score
+                            """
+    )
+    aga_user_prompt = (
+    f"""Grade the following question-answer pair using the grading rubric and context provided - {request.query}"""
+    )
+    # Generate the response using the utility function
+    print(request.query)
+    full_text = await generate_response(request, context, aga_system_prompt, aga_user_prompt)
+        
+    # Extract the response content
+    response_content = full_text
+
+    # Define the criteria
+    criteria = ["Correctness", "Readability", "Comprehensiveness"]
+
+    # List to store individual scores
+    scores = []
+
+    for criterion in criteria:
+        # Use regular expression to search for the criterion followed by 'Score:'
+        criterion_pattern = re.compile(rf'{criterion}:\s*\**\s*Score\s*(\d+)', re.IGNORECASE)
+        match = criterion_pattern.search(response_content)
+        if match:
+            # Extract the score value
+            score_value = int(match.group(1).strip())
+            scores.append(score_value)
+
+    # Calculate the average score if we have scores
+    avg_score = sum(scores) / len(scores) if scores else 0
+
+    response = {
+        "justification": full_text,
+        "average_score": avg_score
+    }    
+    return response
+
+# @app.post("/api/ollamaAGA")
+# async def ollama_aga(request: QueryRequest):
+#     context = await make_request(request.query)
+#     if context is None:
+#         raise Exception("Failed to fetch context")
     
-    variants, avg_score = await grading_assistant(request.query, context)
-    return {"justification": variants, "average_score": avg_score}
+#     variants, avg_score = await grading_assistant(request.query, context)
+    
+#     response = {
+#         "justification": variants,
+#         "average_score": avg_score
+#     }
+    
+#     return response
+
+@app.post("/api/ollamaAGA2")
+async def ollama_aga2(request: QueryRequest, current_user: TokenData = Depends(get_current_user)):
+    # Extract context
+    context = await make_request(request.query)
+    if context is None:
+        raise HTTPException(status_code=500, detail="Failed to fetch context")
+    # Example custom prompts
+    aga_system_prompt = (
+        f"""Please act as an impartial judge and evaluate the quality of the provided answer which attempts to answer the provided question based on a provided context.
+            You'll be given context, question and answer to submit your reasoning and score for the correctness, comprehensiveness and readability of the answer. 
+
+            Below is your grading rubric: 
+            - Correctness: If the answer correctly answers the question, below are the details for different scores:
+            - Score 0: the answer is completely incorrect, doesn't mention anything about the question or is completely contrary to the correct answer.
+                - For example, when asked “How to terminate a databricks cluster”, the answer is an empty string, or content that's completely irrelevant, or sorry I don't know the answer.
+            - Score 1: the answer provides some relevance to the question and answers one aspect of the question correctly.
+                - Example:
+                    - Question: How to terminate a databricks cluster
+                    - Answer: Databricks cluster is a cloud-based computing environment that allows users to process big data and run distributed data processing tasks efficiently.
+                    - Or answer:  In the Databricks workspace, navigate to the "Clusters" tab. And then this is a hard question that I need to think more about it
+            - Score 2: the answer mostly answers the question but is missing or hallucinating on one critical aspect.
+                - Example:
+                    - Question: How to terminate a databricks cluster”
+                    - Answer: “In the Databricks workspace, navigate to the "Clusters" tab.
+                    Find the cluster you want to terminate from the list of active clusters.
+                    And then you'll find a button to terminate all clusters at once”
+            - Score 3: the answer correctly answers the question and is not missing any major aspect. In this case, to score correctness 3, the final answer must be correct, final solution for numerical problems is of utmost importance.
+                - Example:
+                    - Question: How to terminate a databricks cluster
+                    - Answer: In the Databricks workspace, navigate to the "Clusters" tab.
+                    Find the cluster you want to terminate from the list of active clusters.
+                    Click on the down-arrow next to the cluster name to open the cluster details.
+                    Click on the "Terminate" button. A confirmation dialog will appear. Click "Terminate" again to confirm the action.”
+            - Comprehensiveness: How comprehensive is the answer, does it fully answer all aspects of the question and provide comprehensive explanation and other necessary information. Below are the details for different scores:
+            - Score 0: typically if the answer is completely incorrect, then the comprehensiveness is also zero.
+            - Score 1: if the answer is correct but too short to fully answer the question, then we can give score 1 for comprehensiveness.
+                - Example:
+                    - Question: How to use databricks API to create a cluster?
+                    - Answer: First, you will need a Databricks access token with the appropriate permissions. You can generate this token through the Databricks UI under the 'User Settings' option. And then (the rest is missing)
+            - Score 2: the answer is correct and roughly answers the main aspects of the question, but it's missing description about details. Or is completely missing details about one minor aspect.
+                - Example:
+                    - Question: How to use databricks API to create a cluster?
+                    - Answer: You will need a Databricks access token with the appropriate permissions. Then you'll need to set up the request URL, then you can make the HTTP Request. Then you can handle the request response.
+                - Example:
+                    - Question: How to use databricks API to create a cluster?
+                    - Answer: You will need a Databricks access token with the appropriate permissions. Then you'll need to set up the request URL, then you can make the HTTP Request. Then you can handle the request response.
+            - Score 3: the answer is correct, and covers all the main aspects of the question
+            - Readability: How readable is the answer, does it have redundant information or incomplete information that hurts the readability of the answer.
+            - Score 0: the answer is completely unreadable, e.g. full of symbols that's hard to read; e.g. keeps repeating the words that it's very hard to understand the meaning of the paragraph. No meaningful information can be extracted from the answer.
+            - Score 1: the answer is slightly readable, there are irrelevant symbols or repeated words, but it can roughly form a meaningful sentence that covers some aspects of the answer.
+                - Example:
+                    - Question: How to use databricks API to create a cluster?
+                    - Answer: You you  you  you  you  you  will need a Databricks access token with the appropriate permissions. And then then you'll need to set up the request URL, then you can make the HTTP Request. Then Then Then Then Then Then Then Then Then
+            - Score 2: the answer is correct and mostly readable, but there is one obvious piece that's affecting the readability (mentioning of irrelevant pieces, repeated words)
+                - Example:
+                    - Question: How to terminate a databricks cluster
+                    - Answer: In the Databricks workspace, navigate to the "Clusters" tab.
+                    Find the cluster you want to terminate from the list of active clusters.
+                    Click on the down-arrow next to the cluster name to open the cluster details.
+                    Click on the "Terminate" button…………………………………..
+                    A confirmation dialog will appear. Click "Terminate" again to confirm the action.
+            - Score 3: the answer is correct and reader friendly, no obvious piece that affect readability.          
+            The format in which you should provide results-
+                Correctness:
+                    -Score
+                    -Explanation of score
+                Readability:
+                    -Score
+                    -Explanation of score
+                Comprehensiveness:
+                    -Score
+                    -Explanation of score
+                            """
+    )
+    aga_user_prompt = (
+    f"""Grade the following question-answer pair using the grading rubric and context provided - {request.query}"""
+    )
+    # Generate the response using the utility function
+    print(request.query)
+    full_text = await generate_response(request, context, aga_system_prompt, aga_user_prompt)
+        
+    # Extract the response content
+    response_content = full_text
+
+    # Define the criteria
+    criteria = ["Correctness", "Readability", "Comprehensiveness"]
+
+    # List to store individual scores
+    scores = []
+
+    for criterion in criteria:
+        # Use regular expression to search for the criterion followed by 'Score:'
+        criterion_pattern = re.compile(rf'{criterion}:\s*\**\s*Score\s*(\d+)', re.IGNORECASE)
+        match = criterion_pattern.search(response_content)
+        if match:
+            # Extract the score value
+            score_value = int(match.group(1).strip())
+            scores.append(score_value)
+
+    # Calculate the average score if we have scores
+    avg_score = sum(scores) / len(scores) if scores else 0
+
+    response = {
+        "justification": full_text,
+        "average_score": avg_score
+    }    
+    return response
+
 
 @app.post("/api/ollamaAQG")
 async def ollama_aqg(request: QueryRequestaqg):
     query = request.query
     n = request.NumberOfVariants
-    context = await make_request(query)
-    variants, variants_dict = await generate_question_variants(query, n, context)
+    # Extract context
+    context = await make_request(request.query)
+    if context is None:
+        raise HTTPException(status_code=500, detail="Failed to fetch context")
+    # Example custom prompts
+    aqg_system_prompt = (
+        f"""
+        **Task: Design a Variety of Mathematical and Conceptual Problem Scenarios**
+
+        ### Background:
+        You are tasked with creating a set of unique problem scenarios based on the following context:
+
+        **[CONTEXT START]**  
+        {context}  
+        **[CONTEXT END]**
+
+        Your objective is to generate distinct variations of a core problem by creatively altering its numerical, conceptual, and contextual elements. Each scenario should challenge students to apply diverse problem-solving strategies and think critically about the concepts involved.
+
+        ### Creation Guidelines:
+
+        1. **Diversify Numerical Elements**: Transform the numerical aspects of the problem, such as changing quantities, constants, or measurements. These alterations should introduce new dimensions to the problem, encouraging varied computational approaches.
+
+        2. **Reinvent Problem Conditions**: Adjust or replace conditions within the problem, such as shifting the relationships between variables, altering assumptions, or imposing new constraints. These modifications should lead to different methods of solution and analysis.
+
+        3. **Introduce Novel Variables**: Add, remove, or substitute variables to change the nature of the problem. For example, altering the number of components in a sequence or changing the type of equation can lead to entirely different problem-solving paths.
+
+        4. **Change the Setting or Application**: Place the problem in a new context or application, such as using different real-world scenarios or shifting the problem’s focus to another field (e.g., from physics to economics). This approach helps students see the problem from various perspectives and understand its broader relevance.
+
+        5. **Redesign the Problem Statement**: Reword the problem to emphasize different theoretical aspects, such as shifting focus from procedure to concept or from application to theory. This encourages students to explore different dimensions of the same problem.
+
+        6. **Combine or Fragment Concepts**: Either merge multiple concepts into a single complex problem or break down a problem into simpler, interrelated parts. This approach encourages deeper understanding and the ability to connect disparate ideas.
+
+        7. **Engage with Current Developments**: Integrate contemporary trends or recent discoveries related to the problem’s context, making the scenario more engaging and relevant for students.
+
+        ### Multi-Part Problem Design:
+
+        1. **Consistency Across Parts**: Ensure that if the original problem is multi-part, the variations retain the same structure. Each part of the variant should correspond to the original, with appropriate changes to ensure uniqueness.
+
+        2. **Layered Challenges**: Within each multi-part variant, introduce different layers of complexity by altering the relationships between parts. Ensure that each part adds depth to the overall problem.
+
+        3. **Encourage Exploration**: Design each part to explore different aspects of the problem, pushing students to use a variety of techniques and perspectives to arrive at solutions.
+
+        ### Problem Complexity:
+
+        1. **Standalone Scenarios**: Ensure each problem is self-contained, providing enough information and complexity to stand on its own without reference to other problems.
+
+        2. **Promote Analytical Thinking**: Create problems that require deep thought and analysis, moving beyond simple calculations to engage students in understanding and application.
+
+        3. **Diverse Problem-Solving Approaches**: Design scenarios that encourage students to explore multiple methods of solving the problem, fostering creativity and flexibility in thinking.
+
+        ### Essential Considerations:
+        - **Complete Transformation**: Each scenario must differ significantly in numbers, conditions, and theoretical focus to provide a wide range of challenges.
+        - **Independent Design**: Each problem variant should be independent, not relying on others for context or information.
+        - **Variety and Depth**: Ensure a broad spectrum of challenges to stimulate critical thinking and in-depth analysis.
+        - **Structural Integrity**: In multi-part problems, maintain the original structure while ensuring each variant part is thoughtfully designed and distinct.
+        - **DO NOT INCLUDE ANSWERS OR SOLUTIONS**
+                                
+        ### Example 1: Single-Part Question with 3 Variants
+
+        **Original Question:**
+        *Question:* A sample of gas occupies 4 liters at a pressure of 2 atm and a temperature of 300 K. Calculate the number of moles of gas in the sample using the ideal gas law.
+        
+        Response-
+
+        Spanda
+        **Variant 1**:  
+        a. A sample of gas occupies 6 liters at a pressure of 1.5 atm and a temperature of 310 K. Calculate the number of moles of gas in the sample using the ideal gas law.
+        
+        Spanda
+        **Variant 2**:  
+        a. A sample of gas occupies 3 liters at a pressure of 2.5 atm and a temperature of 280 K. Calculate the number of moles of gas in the sample using the ideal gas law.
+        
+        Spanda
+        **Variant 3**:  
+        a. A sample of gas occupies 5 liters at a pressure of 1 atm and a temperature of 350 K. Calculate the number of moles of gas in the sample using the ideal gas law.
+
+        ### Example 2: Multi-Part Question with 2 Variants
+
+        **Original Question:**
+        *Question:*  
+        a. Find the roots of the quadratic equation \(x^2 - 4x + 3 = 0\).  
+        b. Determine the coordinates of the vertex of the parabola described by the equation \(y = x^2 - 4x + 3\).  
+        c. Calculate the axis of symmetry for the parabola.
+        
+        Response -
+        
+        Spanda
+        **Variant 1**:  
+        a. Find the roots of the quadratic equation \(x^2 - 6x + 8 = 0\).  
+        b. Determine the coordinates of the vertex of the parabola described by the equation \(y = x^2 - 6x + 8\).  
+        c. Calculate the axis of symmetry for the parabola.
+
+        Spanda
+        **Variant 2**:  
+        a. Find the roots of the quadratic equation \(2x^2 - 8x + 6 = 0\).  
+        b. Determine the coordinates of the vertex of the parabola described by the equation \(y = 2x^2 - 8x + 6\).  
+        c. Calculate the axis of symmetry for the parabola.
+
+        Utilize these guidelines to generate distinct and engaging questions based on the given context.
+    """
+    )
+    aqg_user_prompt = (
+        f"""Please generate {n} variants of the question: '{query}'.
+
+            In multi-part problems, maintain the original structure while ensuring each variant part is thoughtfully designed and distinct. Type 'Spanda' before the beggining of every variant. Make sure to add 'Spanda' before every variant, its important.
+        """
+    )
+    # Generate the response using the utility function
+    full_text = await generate_response(request, context, aqg_system_prompt, aqg_user_prompt)
+    variants_dict = extract_variants(query, full_text)
     response = {
-        "variants": variants,
+        "variants": full_text,
         "variants_dict": variants_dict
     }
     return response
 
 
 
+# @app.post("/api/ollamaAQG")
+# async def ollama_aqg(request: QueryRequestaqg):
+#     query = request.query
+#     n = request.NumberOfVariants
+#     context = await make_request(query)
+#     variants, variants_dict = await generate_question_variants(query, n, context)
+#     response = {
+#         "variants": variants,
+#         "variants_dict": variants_dict
+#     }
+#     return response
+
+
+
 @app.post("/api/ollamaAQG2")
 async def ollama_aqg(request: QueryRequestaqg, current_user: TokenData = Depends(get_current_user)):
-   
-    # Token has already been validated by get_current_user, so you can proceed
+    query = request.query
+    n = request.NumberOfVariants
+    # Extract context
     context = await make_request(request.query)
-    
     if context is None:
         raise HTTPException(status_code=500, detail="Failed to fetch context")
+    # Example custom prompts
+    aqg_system_prompt = (
+        f"""
+        **Task: Design a Variety of Mathematical and Conceptual Problem Scenarios**
+
+        ### Background:
+        You are tasked with creating a set of unique problem scenarios based on the following context:
+
+        **[CONTEXT START]**  
+        {context}  
+        **[CONTEXT END]**
+
+        Your objective is to generate distinct variations of a core problem by creatively altering its numerical, conceptual, and contextual elements. Each scenario should challenge students to apply diverse problem-solving strategies and think critically about the concepts involved.
+
+        ### Creation Guidelines:
+
+        1. **Diversify Numerical Elements**: Transform the numerical aspects of the problem, such as changing quantities, constants, or measurements. These alterations should introduce new dimensions to the problem, encouraging varied computational approaches.
+
+        2. **Reinvent Problem Conditions**: Adjust or replace conditions within the problem, such as shifting the relationships between variables, altering assumptions, or imposing new constraints. These modifications should lead to different methods of solution and analysis.
+
+        3. **Introduce Novel Variables**: Add, remove, or substitute variables to change the nature of the problem. For example, altering the number of components in a sequence or changing the type of equation can lead to entirely different problem-solving paths.
+
+        4. **Change the Setting or Application**: Place the problem in a new context or application, such as using different real-world scenarios or shifting the problem’s focus to another field (e.g., from physics to economics). This approach helps students see the problem from various perspectives and understand its broader relevance.
+
+        5. **Redesign the Problem Statement**: Reword the problem to emphasize different theoretical aspects, such as shifting focus from procedure to concept or from application to theory. This encourages students to explore different dimensions of the same problem.
+
+        6. **Combine or Fragment Concepts**: Either merge multiple concepts into a single complex problem or break down a problem into simpler, interrelated parts. This approach encourages deeper understanding and the ability to connect disparate ideas.
+
+        7. **Engage with Current Developments**: Integrate contemporary trends or recent discoveries related to the problem’s context, making the scenario more engaging and relevant for students.
+
+        ### Multi-Part Problem Design:
+
+        1. **Consistency Across Parts**: Ensure that if the original problem is multi-part, the variations retain the same structure. Each part of the variant should correspond to the original, with appropriate changes to ensure uniqueness.
+
+        2. **Layered Challenges**: Within each multi-part variant, introduce different layers of complexity by altering the relationships between parts. Ensure that each part adds depth to the overall problem.
+
+        3. **Encourage Exploration**: Design each part to explore different aspects of the problem, pushing students to use a variety of techniques and perspectives to arrive at solutions.
+
+        ### Problem Complexity:
+
+        1. **Standalone Scenarios**: Ensure each problem is self-contained, providing enough information and complexity to stand on its own without reference to other problems.
+
+        2. **Promote Analytical Thinking**: Create problems that require deep thought and analysis, moving beyond simple calculations to engage students in understanding and application.
+
+        3. **Diverse Problem-Solving Approaches**: Design scenarios that encourage students to explore multiple methods of solving the problem, fostering creativity and flexibility in thinking.
+
+        ### Essential Considerations:
+        - **Complete Transformation**: Each scenario must differ significantly in numbers, conditions, and theoretical focus to provide a wide range of challenges.
+        - **Independent Design**: Each problem variant should be independent, not relying on others for context or information.
+        - **Variety and Depth**: Ensure a broad spectrum of challenges to stimulate critical thinking and in-depth analysis.
+        - **Structural Integrity**: In multi-part problems, maintain the original structure while ensuring each variant part is thoughtfully designed and distinct.
+        - **DO NOT INCLUDE ANSWERS OR SOLUTIONS**
+                                
+        ### Example 1: Single-Part Question with 3 Variants
+
+        **Original Question:**
+        *Question:* A sample of gas occupies 4 liters at a pressure of 2 atm and a temperature of 300 K. Calculate the number of moles of gas in the sample using the ideal gas law.
+        
+        Response-
+
+        Spanda
+        **Variant 1**:  
+        a. A sample of gas occupies 6 liters at a pressure of 1.5 atm and a temperature of 310 K. Calculate the number of moles of gas in the sample using the ideal gas law.
+        
+        Spanda
+        **Variant 2**:  
+        a. A sample of gas occupies 3 liters at a pressure of 2.5 atm and a temperature of 280 K. Calculate the number of moles of gas in the sample using the ideal gas law.
+        
+        Spanda
+        **Variant 3**:  
+        a. A sample of gas occupies 5 liters at a pressure of 1 atm and a temperature of 350 K. Calculate the number of moles of gas in the sample using the ideal gas law.
+
+        ### Example 2: Multi-Part Question with 2 Variants
+
+        **Original Question:**
+        *Question:*  
+        a. Find the roots of the quadratic equation \(x^2 - 4x + 3 = 0\).  
+        b. Determine the coordinates of the vertex of the parabola described by the equation \(y = x^2 - 4x + 3\).  
+        c. Calculate the axis of symmetry for the parabola.
+        
+        Response -
+        
+        Spanda
+        **Variant 1**:  
+        a. Find the roots of the quadratic equation \(x^2 - 6x + 8 = 0\).  
+        b. Determine the coordinates of the vertex of the parabola described by the equation \(y = x^2 - 6x + 8\).  
+        c. Calculate the axis of symmetry for the parabola.
+
+        Spanda
+        **Variant 2**:  
+        a. Find the roots of the quadratic equation \(2x^2 - 8x + 6 = 0\).  
+        b. Determine the coordinates of the vertex of the parabola described by the equation \(y = 2x^2 - 8x + 6\).  
+        c. Calculate the axis of symmetry for the parabola.
+
+        Utilize these guidelines to generate distinct and engaging questions based on the given context.
+    """
+    )
+    aqg_user_prompt = (
+        f"""Please generate {n} variants of the question: '{query}'.
+
+            In multi-part problems, maintain the original structure while ensuring each variant part is thoughtfully designed and distinct. Type 'Spanda' before the beggining of every variant. Make sure to add 'Spanda' before every variant, its important.
+        """
+    )
+    # Generate the response using the utility function
+    full_text = await generate_response(request, context, aqg_system_prompt, aqg_user_prompt)
+    variants_dict = extract_variants(query, full_text)
+    response = {
+        "variants": full_text,
+        "variants_dict": variants_dict
+    }
+    return response
+
+
+async def generate_response(request: QueryRequest, 
+                            context: str, 
+                            custom_system_prompt: str, 
+                            custom_user_prompt: str) -> str:
+    # Initialize the generator
+    generator = OllamaGenerator()
     
-    variants, variants_dict = await generate_question_variants(request.query, request.NumberOfVariants, context)
-    
-    return {"variants": variants, "variants_dict": variants_dict}
+    conversation = {}  # Replace with actual conversation data if available
+    full_text = ""
+    # Pass the custom prompts to generate_stream
+    async for chunk in generator.generate_stream(
+        [request.query], 
+        [context], 
+        conversation,
+        system_prompt=custom_system_prompt,  # Custom system prompt
+        user_prompt=custom_user_prompt  # Custom user prompt
+    ):
+        full_text += chunk["message"]
+        if chunk["finish_reason"] == "stop":
+            break
+    print(full_text)
+    return full_text
 
 
 @app.post("/api/spandachat")
 async def spanda_chat(request: QueryRequest):
+    # Extract context
     context = await make_request(request.query)
     if context is None:
-        raise Exception("Failed to fetch context")
-    
-    answer = await chatbot(request.query, context)
-    
+        raise HTTPException(status_code=500, detail="Failed to fetch context")
+    # Example custom prompts
+    chatbot_system_prompt = (
+        """You are an academic assistant chatbot. Your role is to answer questions based solely on the given context. 
+        If a question is outside the provided context, politely inform the user that you can only respond to questions within the given context. 
+        If someone asks about the chatbot, explain that you are an assistant designed to help users by answering academic and course-oriented questions."""
+    )
+    chatbot_user_prompt = (
+        f"""
+        Context: {context}
+
+        Query: {request.query}
+        """
+    )
+    # Generate the response using the utility function
+    full_text = await generate_response(request, context, chatbot_system_prompt, chatbot_user_prompt)
+    print("FULL TEXT")
+    print(full_text)
     response = {
-        "answer": answer
-    }
-    
+        "answer": full_text
+    }    
     return response
 
+
+# @app.post("/api/ollamaAFE")
+# async def ollama_afe(request: QueryRequest):
+#     dimensions = dimensions_AFE
+#     instructor_name = request.query
+#     dimension_scores = {}
+#     all_responses = {}
+
+#     for dimension, dimension_data in dimensions.items():
+#         sub_dimensions = dimension_data["sub-dimensions"]
+#         total_sub_weight = sum([sub_data["weight"] for sub_data in sub_dimensions.values()])
+#         weighted_sub_scores = 0
+        
+#         all_responses[dimension] = {}
+
+#         for sub_dim_name, sub_dim_data in sub_dimensions.items():
+#             query = f"""
+#             Evaluate the {sub_dim_name.lower()} of the instructor "{instructor_name}" based on the following criteria:
+#             Definition: {sub_dim_data['definition']}
+#             Example: {sub_dim_data['example']}
+#             Criteria:
+#             {json.dumps(sub_dim_data['criteria'], indent=4)}
+#             Provide a score between 1 and 5 based on the criteria.
+#             """
+
+#             # Assuming make_request returns the context required for evaluation
+#             context = await make_request(query)
+#             response, score_dict = await instructor_eval(instructor_name, context, sub_dim_name, sub_dim_data["criteria"])
+
+#             # Store the response and score
+#             all_responses[dimension][sub_dim_name] = f"{sub_dim_name}: {score_dict.get(sub_dim_name, 'N/A')} - Detailed Explanation with Examples and justification for examples.\n\n{response}"
+#             score_str = score_dict.get(sub_dim_name, "0")
+#             score = int(score_str) if score_str.isdigit() else 0
+#             normalized_score = (score / 5) * sub_dim_data["weight"]
+#             weighted_sub_scores += normalized_score
+
+#         # Calculate the weighted average for this dimension
+#         dimension_score = (weighted_sub_scores / total_sub_weight) * dimension_data["weight"]
+#         dimension_scores[dimension] = dimension_score
+
+#     return {
+#         "dimension_scores": dimension_scores,
+#         "DOCUMENT": all_responses
+#     }
+
+
+
+# REFACTOR
 @app.post("/api/ollamaAFE")
 async def ollama_afe(request: QueryRequest):
     dimensions = dimensions_AFE
     instructor_name = request.query
-    dimension_scores = {}
+    scores_dict = {}
     all_responses = {}
 
     for dimension, dimension_data in dimensions.items():
@@ -1810,47 +2481,109 @@ async def ollama_afe(request: QueryRequest):
             {json.dumps(sub_dim_data['criteria'], indent=4)}
             Provide a score between 1 and 5 based on the criteria.
             """
+            # Extract context
+            context = await make_request(query)
+            if context is None:
+                raise HTTPException(status_code=500, detail="Failed to fetch context")
+            # Example custom prompts
+            afe_system_prompt = (
+                """
+                ### Instructions
 
-            # Assuming make_request returns the context required for evaluation
-            context = await make_request(instructor_name)
-            response, score_dict = await instructor_eval(instructor_name, context, sub_dim_name, sub_dim_data["criteria"])
+                Evaluate the teacher's performance based on the criterion: **{sub_dim_name}** - {explanation}.
+
+                #### Evaluation Details
+
+                - **Focus:** Only use the provided video transcript.
+                - **Ignore:** Interruptions from student entries/exits and notifications of participants joining or leaving the meeting.
+                - **Scoring:** Assign scores from 1 to 5.
+
+                #### Criteria
+
+                - **Criterion Explanation:** {explanation}
+                - If the transcript does not provide enough information to assess **{sub_dim_name}**, score as **N/A** and explain why.
+                - Justify any score below 5 with clear reasoning.
+
+                #### Output Format
+
+                - **{sub_dim_name}:** score_obtained: score (1-5 or N/A) - Note: No special formatting should be used here.
+
+                - **Detailed Explanation with Examples:**
+                - Example 1: "[Quoted text from transcript]" [Description] [Timestamp]
+                - Example 2: "[Quoted text from transcript]" [Description] [Timestamp]
+                - Example 3: "[Quoted text from transcript]" [Description] [Timestamp]
+                - ...
+
+                - Provide both positive and negative examples. 
+                - Highlight poor examples if the score is below 5.
+                - Consider the context of statements as context is crucial.
+
+                Rate strictly on a scale of 1 to 5, using whole numbers only. Ensure examples are directly relevant to the evaluation criterion.
+                """
+            )
+            afe_user_prompt = (
+                f"""
+                Here are given transcript snippets for {instructor_name}-   
+                    [TRANSCRIPT START]
+                    {context}
+                    [TRANSCRIPT END]
+                Please provide an evaluation of the teacher named '{instructor_name}' on the following criteria: '{sub_dim_name}'. Only include information from transcripts where '{instructor_name}' is the instructor.
+                """
+            )
+            # Generate the response using the utility function
+            full_text = await generate_response(request, context, afe_system_prompt, afe_user_prompt)
+            response = full_text
+
+            pattern = rf'(score:\s*([\s\S]*?)(\d+)|\**{sub_dim_name}\**\s*:\s*(\d+))'
+            match = re.search(pattern, response, re.IGNORECASE)
+            if match:
+                # Check which group matched and extract the score
+                if match.group(3):  # This means 'Score:' pattern matched
+                    score_value = match.group(3).strip()  # group(3) contains the number after 'Score:'
+                elif match.group(4):  # This means direct number pattern matched
+                    score_value = match.group(4).strip()  # group(4) contains the number directly after score criterion
+                else:
+                    score_value = "N/A"  # Fallback in case groups are not as expected
+                scores_dict[sub_dim_name] = score_value
+            else:
+                scores_dict[sub_dim_name] = "N/A"
 
             # Store the response and score
-            all_responses[dimension][sub_dim_name] = f"{sub_dim_name}: {score_dict.get(sub_dim_name, 'N/A')} - Detailed Explanation with Examples and justification for examples.\n\n{response}"
-            score_str = score_dict.get(sub_dim_name, "0")
+            all_responses[dimension][sub_dim_name] = f"{sub_dim_name}: {scores_dict.get(sub_dim_name, 'N/A')} - Detailed Explanation with Examples and justification for examples.\n\n{response}"
+            score_str = scores_dict.get(sub_dim_name, "0")
             score = int(score_str) if score_str.isdigit() else 0
             normalized_score = (score / 5) * sub_dim_data["weight"]
             weighted_sub_scores += normalized_score
 
         # Calculate the weighted average for this dimension
         dimension_score = (weighted_sub_scores / total_sub_weight) * dimension_data["weight"]
-        dimension_scores[dimension] = dimension_score
+        scores_dict[dimension] = dimension_score
 
     return {
-        "dimension_scores": dimension_scores,
+        "dimension_scores": scores_dict,
         "DOCUMENT": all_responses
     }
 
-# Modified import endpoint to handle transcript uploads
-@app.post("/api/importTranscript")
-async def import_transcript(transcript_data: UploadFile = File(...)):
-    try:
-        contents = await transcript_data.file.read()
+# # Modified import endpoint to handle transcript uploads
+# @app.post("/api/importTranscript")
+# async def import_transcript(transcript_data: UploadFile = File(...)):
+#     try:
+#         contents = await transcript_data.file.read()
 
-        # Convert to Base64
-        base64_content = base64.b64encode(contents).decode('utf-8')
+#         # Convert to Base64
+#         base64_content = base64.b64encode(contents).decode('utf-8')
 
-        # Upload to Weaviate using the existing endpoint
-        upload_to_weaviate(base64_content, transcript_data.filename)
+#         # Upload to Weaviate using the existing endpoint
+#         upload_to_weaviate(base64_content, transcript_data.filename)
 
-        return JSONResponse(content={"message": "Transcript uploaded successfully"})
-    except ValidationError as e:
-        # Handle validation errors
-        return JSONResponse(content={"error": e.errors()}, status_code=422)
-    except HTTPException as e:
-        raise e  # Reraise the exception if it's a Weaviate import failure
-    except Exception as e:
-        return JSONResponse(content={"error": str(e)}, status_code=500)
+#         return JSONResponse(content={"message": "Transcript uploaded successfully"})
+#     except ValidationError as e:
+#         # Handle validation errors
+#         return JSONResponse(content={"error": e.errors()}, status_code=422)
+#     except HTTPException as e:
+#         raise e  # Reraise the exception if it's a Weaviate import failure
+#     except Exception as e:
+#         return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
 @app.post("/api/upload_transcript")
@@ -1903,14 +2636,14 @@ async def upload_transcript(payload: ImportPayload):
 async def evaluate_Transcipt(request: QueryRequest):
     dimensions = {
         "Communication Clarity": "The ability to convey information and instructions clearly and effectively so that students can easily understand the material being taught.\n"
-                                "0: Instructions are often vague or confusing, leading to frequent misunderstandings among students.\n"
-                                "Example: 'Read the text and do the thing.'\n"
-                                "1: Occasionally provides clear instructions but often lacks detail, requiring students to ask for further clarification.\n"
-                                "Example: 'Read the chapter and summarize it.'\n"
-                                "2: Generally clear and detailed in communication, though sometimes slightly ambiguous.\n"
-                                "Example: 'Read chapter 3 and summarize the main points in 200 words.'\n"
-                                "3: Always communicates instructions and information clearly, precisely, and comprehensively, ensuring students fully understand what is expected.\n"
-                                "Example: 'Read chapter 3, identify the main points, and write a 200-word summary. Make sure to include at least three key arguments presented by the author.'",
+                                 "0: Instructions are often vague or confusing, leading to frequent misunderstandings among students.\n"
+                                 "Example: 'Read the text and do the thing.'\n"
+                                 "1: Occasionally provides clear instructions but often lacks detail, requiring students to ask for further clarification.\n"
+                                 "Example: 'Read the chapter and summarize it.'\n"
+                                 "2: Generally clear and detailed in communication, though sometimes slightly ambiguous.\n"
+                                 "Example: 'Read chapter 3 and summarize the main points in 200 words.'\n"
+                                 "3: Always communicates instructions and information clearly, precisely, and comprehensively, ensuring students fully understand what is expected.\n"
+                                 "Example: 'Read chapter 3, identify the main points, and write a 200-word summary. Make sure to include at least three key arguments presented by the author.'",
 
         "Punctuality": "Consistently starting and ending classes on time, as well as meeting deadlines for assignments and other class-related activities.\n"
                     "0: Frequently starts and ends classes late, often misses deadlines for assignments and class-related activities.\n"
@@ -1931,9 +2664,7 @@ async def evaluate_Transcipt(request: QueryRequest):
                     "Example: Usually offers praise and support but has off days.\n"
                     "3: Consistently maintains a positive and encouraging attitude, always fostering a supportive and optimistic environment.\n"
                     "Example: Always greets students warmly, frequently provides positive feedback and encouragement.",
-
     }
-
 
     instructor_name = request.query
     all_responses = {}
@@ -2017,46 +2748,40 @@ async def resume_eval(resume_name, jd_name, context, score_criterion, explanatio
 
     user_prompt = f"""Please provide an evaluation of the resume named '{resume_name}' in comparison to the job description named '{jd_name}' on the following criteria: '{score_criterion}'. Only include information from the provided documents."""
 
-    payload = {
-        "messages": [
-            {
-                "role": "system",
-                "content": system_message
-            },
-            {
-                "role": "user",
-                "content": formatted_context + "/n/n" + evaluate_instructions + "/n/n" + user_prompt + " Strictly follow the format of output provided."
-            }
-        ],
-        "stream": False,
-        "options": {
-            "top_k": 1,
-            "top_p": 1,
-            "temperature": 0,
-            "seed": 100
-        }
-    }
+    resume_system_prompt = (
+        f"""
+        {system_message}
+        """
+    )
+    resume_user_prompt = (
+        f"""
+        {formatted_context} + "/n/n" + {evaluate_instructions} + "/n/n" + {user_prompt} + " Strictly follow the format of output provided."
+        """
+    )
+    # Create a QueryRequest object
+    query_request = QueryRequest(query=f"{resume_name}, {jd_name}")
 
-    response = await asyncio.to_thread(ollama.chat, model='llama3.1', messages=payload['messages'], stream=payload['stream'])
-    responses[score_criterion] = response
-    content = response['message']['content']
+    # Properly calling generate_response with all required arguments
+    full_text = await generate_response(
+        query_request,  # Pass the QueryRequest object
+        context, 
+        resume_system_prompt, 
+        resume_user_prompt
+    )
+    
+    responses[score_criterion] = full_text
 
-    pattern = rf'(score:\s*([\s\S]*?)(\d+)|\**{score_criterion}\**\s*:\s*(\d+))'
-    match = re.search(pattern, content, re.IGNORECASE)
+    # Extract score using regex
+    pattern = rf'(score:\s*(\d+)|\**{score_criterion}\**\s*:\s*(\d+))'
+    match = re.search(pattern, full_text, re.IGNORECASE)
 
     if match:
-        if match.group(3):
-            score_value = match.group(3).strip()
-        elif match.group(4):
-            score_value = match.group(4).strip()
-        else:
-            score_value = "N/A"
-        scores_dict[score_criterion] = score_value
+        score_value = match.group(2) or match.group(3) or "N/A"
+        scores_dict[score_criterion] = score_value.strip()
     else:
         scores_dict[score_criterion] = "N/A"
 
     return responses, scores_dict
-
 
 # Define the extract_score function
 def extract_score(response_content):
@@ -2069,102 +2794,18 @@ def extract_score(response_content):
         return int(score)
     return None
 
-async def resume_eval(resume_name, jd_name, context, score_criterion, explanation):
-    user_context = "".join(context)
-    responses = {}
-    scores_dict = {}
-
-    evaluate_instructions = f"""
-        [INST]
-        -Instructions:
-            You are tasked with evaluating a candidate's resume in comparison to a job description based on the criterion: {score_criterion} - {explanation}.
-
-        -Evaluation Details:
-            -Focus exclusively on the provided resume and job description.
-            -Assign scores from 0 to 3:
-                0: Poor performance
-                1: Average performance
-                2: Good performance
-                3: Exceptional performance
-        -Criteria:
-            -Criterion Explanation: {explanation}
-            -If the resume lacks sufficient information to judge {score_criterion}, mark it as N/A and provide a clear explanation.
-            -Justify any score that is not a perfect 3.
-
-        Strictly follow the output format-
-        -Output Format:
-            -{score_criterion}: Score: score(range of 0 to 3, or N/A)
-
-            -Detailed Explanation with Examples and justification for examples:
-                -Example 1: "[Quoted text from resume or job description]" [Description]
-                -Example 2: "[Quoted text from resume or job description]" [Description]
-                -Example 3: "[Quoted text from resume or job description]" [Description]
-                -...
-                -Example n: "[Quoted text from resume or job description]" [Description]
-            -Include both positive and negative instances.
-            -Highlight poor examples if the score is not ideal.
-
-            -Consider the context surrounding the example statements, as the context in which a statement is made is extremely important.
-
-            Rate strictly on a scale of 0 to 3 using whole numbers only.
-
-            Ensure the examples are directly relevant to the evaluation criterion and discard any irrelevant excerpts.
-        [/INST]
-    """
-    system_message = """This is a chat between a user and a judge. The judge gives helpful, detailed, and polite suggestions for improvement for a particular candidate from the given context - the context contains resumes and job descriptions. The assistant should also indicate when the judgment is found in the context."""
-    
-    formatted_documents = f"""Here are the given documents for {resume_name} and {jd_name}:
-                    [RESUME START]
-                    {user_context}
-                    [RESUME END]
-                    [JOB DESCRIPTION START]
-                    {user_context}
-                    [JOB DESCRIPTION END]"""
-    
-    user_prompt = f"""Please provide an evaluation of the candidate named '{resume_name}' in comparison to the job description named '{jd_name}' on the following criteria: '{score_criterion}'. Only include information from the resume and job description where '{resume_name}' is the candidate."""
-
-    payload = {
-        "messages": [
-            {
-                "role": "system",
-                "content": system_message
-            },
-            {
-                "role": "user",
-                "content": formatted_documents + "\n\n" + evaluate_instructions + "\n\n" + user_prompt
-            }
-        ],
-        "stream": False  # Assuming that streaming is set to False, adjust based on your implementation
-    }
-
-    eval_response = await asyncio.to_thread(ollama.chat, model='llama3.1', messages=payload['messages'])  # Assuming chat function is defined to handle the completion request
-
-    # Log the eval_response to see its structure
-    print("eval_response:", eval_response)
-    
-    try:
-        eval_response_content = eval_response['message']['content']
-    except KeyError as e:
-        raise KeyError(f"Expected key 'message' not found in response: {eval_response}")
-
-    response = {
-        score_criterion: {
-            "message": {
-                "content": eval_response_content
-            }
-        }
-    }
-    score = extract_score(eval_response_content)
-    scores_dict[score_criterion] = score
-
-    return response, scores_dict
 
 @app.post("/api/evaluate_Resume")
-async def evaluate_Resume(request: QueryRequest):
+async def evaluate_Resume(request: QueryRequestResume):
     if len(request.query) != 2:
-        raise HTTPException(status_code=400, detail="Invalid request format. Expected two items in query list.")
+        raise HTTPException(status_code=400, detail="Invalid request format. Expected two items in the query list.")
     
     resume_name, jd_name = request.query
+    print("RESUME")
+    print(resume_name)
+    print("JD")
+    print(jd_name)
+    
     dimensions = {
         "Qualification Match": "The extent to which the candidate's educational background, certifications, and experience align with the specific requirements outlined in the job description.\n"
             "0: Qualifications are largely unrelated to the position.\n"
@@ -2219,9 +2860,12 @@ async def evaluate_Resume(request: QueryRequest):
     for dimension, explanation in dimensions.items():
         query = f"Judge Resume named {resume_name} in comparison to Job Description named {jd_name} based on {dimension}."
         context = await make_request(query)  # Assuming make_request is defined elsewhere to get the context
+
         result_responses, result_scores = await resume_eval(resume_name, jd_name, context, dimension, explanation)
-        all_responses[dimension] = result_responses[dimension]['message']['content']
-        all_scores[dimension] = result_scores[dimension]
+        
+        # Assuming result_responses is a string or dict containing the relevant message
+        all_responses[dimension] = result_responses
+        all_scores[dimension] = result_scores
     
     response = {
         "DOCUMENT": all_responses,
