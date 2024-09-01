@@ -2,6 +2,7 @@ from fastapi import FastAPI, WebSocket, File, UploadFile, status, HTTPException,
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+import asyncio
 from ollama import chat as ollama_chat
 from httpx import AsyncClient
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
@@ -47,7 +48,8 @@ from goldenverba.server.types import (
     ImportPayload,
     QueryRequest,
     MoodleRequest,
-    QueryRequestaqg
+    QueryRequestaqg,
+    QueryRequestWithGroundTruth
 )
 from typing import Dict
 from goldenverba.server.spanda_utils import chatbot, dimensions_AFE
@@ -170,6 +172,29 @@ def moodle_api_call(params, extra_params=None):
         raise Exception(f"Error: {result['exception']['message']}")
 
     return result
+
+
+
+async def context_relevance_filter(query: str, context: str) -> str:
+    evaluate_system_prompt = (
+        """You are an AI responsible for assessing whether the provided content is relevant to a specific query. Carefully analyze the content and determine if it directly addresses or provides pertinent information related to the query. Only respond with "YES" if the content is relevant, or "NO" if it is not. Do not provide any explanations, scores, or additional text—just a single word: "YES" or "NO"."""
+    )
+    evaluate_user_prompt = (
+        f"""
+        Content: {context}
+
+        Query: {query}
+
+        You are an AI responsible for assessing whether the provided content is relevant to a specific query. Carefully analyze the content and determine if it directly addresses or provides pertinent information related to the query. Only respond with "YES" if the content is relevant, or "NO" if it is not. Do not provide any explanations, scores, or additional text—just a single word: "YES" or "NO".
+        """
+    )
+    request = QueryRequest(query=query)
+    is_context_relevant = await generate_response(request, context, evaluate_system_prompt, evaluate_user_prompt)
+    # print("Is this context relevant? ")
+    print("Is this context relevant? " + is_context_relevant)
+    if is_context_relevant.lower() == 'no':
+        return " "  # Returns an empty coroutine
+    return context
 
 
 # Function to get the user ID by username
@@ -1184,13 +1209,16 @@ async def answergen_ollama(request: QueryRequest):
     context = await make_request(query)
     if context is None:
         raise HTTPException(status_code=500, detail="Failed to fetch context")
+    
+    filtered_context_answergen = await context_relevance_filter(query, context)
+    print("Filtered context for answergen: " + filtered_context_answergen)
     # Example custom prompts
     answergen_system_prompt = (f"""
         ### Context:
         Ensure that each generated answer is relevant to the following context:
 
         **[CONTEXT START]**
-        {context}
+        {filtered_context_answergen}
         **[CONTEXT END]**
 
         ## Answer Instructions
@@ -1231,8 +1259,11 @@ async def answergen_ollama(request: QueryRequest):
     )
     # Generate the response using the utility function
     full_text = await generate_response(request, context, answergen_system_prompt, answergen_user_prompt)
+       
+    relevance_filtered_response_for_answer_generation = await response_relevance_filter_for_answer_generation(request.query, full_text)
+
     response = {
-        "answer": full_text
+        "answer": relevance_filtered_response_for_answer_generation
     }    
     return response
 
@@ -1868,6 +1899,50 @@ async def grade_assignment(request: RequestAGA, token: str = Depends(oauth2_sche
         return JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
 
 
+
+
+
+
+@app.post("/api/ollamaAGA_with_ground_truth")
+async def ollama_aga_with_ground_truth(request: QueryRequestWithGroundTruth):
+
+    if request.rubric == None:
+        request.rubric = request.default_rubric
+    # TO;DO - Need to verify if constraing context to just the ground truth peanalizes the student unnecessarily.
+
+    aga_with_ground_truth_system_prompt = (
+        f"""Please act as an impartial judge and evaluate the quality of the provided answer which attempts to answer the provided question based on the provided rubric for evaluation.
+            You'll be given rubric, question and answer to submit your reasoning and score.
+        """
+    )
+    aga_with_ground_truth_user_prompt = (
+    f"""
+    Given this question -
+    Question: {request.question}
+
+    Using the rubric for evaluation - 
+    Rubric: {request.rubric}
+
+    Using the following model answer - 
+    Model answer: {request.ground_truth}
+    Do NOT grade the Model answer. The model answer is only for reference. Grade only the 
+    
+    Grade the following user answer -
+    User answer: {request.answer}"""
+    )
+
+    print("OVERALL PROMPT FOR LLM")
+    print(aga_with_ground_truth_system_prompt + aga_with_ground_truth_user_prompt)
+
+    structure_for_generate_query = QueryRequest(query = request.answer)
+    graded_response = await generate_response(structure_for_generate_query, request.ground_truth, aga_with_ground_truth_system_prompt, aga_with_ground_truth_user_prompt)
+    
+    relevance_filtered_response_for_aga_with_ground_truth = await response_relevance_filter_for_grading_assistant(request.question, request.answer, graded_response)   
+
+    return relevance_filtered_response_for_aga_with_ground_truth
+    # return graded_response
+
+
     
 @app.post("/api/ollamaAGA")
 async def ollama_aga(request: QueryRequest):
@@ -1876,12 +1951,17 @@ async def ollama_aga(request: QueryRequest):
     if context is None:
         raise HTTPException(status_code=500, detail="Failed to fetch context")
     # Example custom prompts
+
+    # filtered_context_aga = await context_relevance_filter(request.query, context)
+
+    
+
     aga_system_prompt = (
         f"""Please act as an impartial judge and evaluate the quality of the provided answer which attempts to answer the provided question based on a provided context.
             You'll be given context, question and answer to submit your reasoning and score for the correctness, comprehensiveness and readability of the answer. 
 
             Below is your grading rubric: 
-            - Correctness: If the answer correctly answers the question, below are the details for different scores:
+            Correctness: If the answer correctly answers the question, below are the details for different scores:
             - Score 0: the answer is completely incorrect, doesn't mention anything about the question or is completely contrary to the correct answer.
                 - For example, when asked “How to terminate a databricks cluster”, the answer is an empty string, or content that's completely irrelevant, or sorry I don't know the answer.
             - Score 1: the answer provides some relevance to the question and answers one aspect of the question correctly.
@@ -1949,7 +2029,8 @@ async def ollama_aga(request: QueryRequest):
     # Generate the response using the utility function
     print(request.query)
     full_text = await generate_response(request, context, aga_system_prompt, aga_user_prompt)
-        
+
+
     # Extract the response content
     response_content = full_text
 
@@ -2109,6 +2190,12 @@ async def ollama_aqg(request: QueryRequestaqg):
     context = await make_request(request.query)
     if context is None:
         raise HTTPException(status_code=500, detail="Failed to fetch context")
+    
+    filtered_aqg_context = await context_relevance_filter(request.query, context)
+    print("FIltered AQG context: ")
+    print(filtered_aqg_context)
+    # print("FILTERED AQG CONTEXT:")
+    # print(context)
     # Example custom prompts
     aqg_system_prompt = (
         f"""
@@ -2118,7 +2205,7 @@ async def ollama_aqg(request: QueryRequestaqg):
         You are tasked with creating a set of unique problem scenarios based on the following context:
 
         **[CONTEXT START]**  
-        {context}  
+        {filtered_aqg_context}  
         **[CONTEXT END]**
 
         Your objective is to generate distinct variations of a core problem by creatively altering its numerical, conceptual, and contextual elements. Each scenario should challenge students to apply diverse problem-solving strategies and think critically about the concepts involved.
@@ -2214,6 +2301,7 @@ async def ollama_aqg(request: QueryRequestaqg):
     )
     # Generate the response using the utility function
     full_text = await generate_response(request, context, aqg_system_prompt, aqg_user_prompt)
+    # relevance_filtered_response_for_question_generation = await response_relevance_filter_for_question_generation(request.query, full_text)
     variants_dict = extract_variants(query, full_text)
     response = {
         "variants": full_text,
@@ -2388,27 +2476,161 @@ async def spanda_chat(request: QueryRequest):
     context = await make_request(request.query)
     if context is None:
         raise HTTPException(status_code=500, detail="Failed to fetch context")
+    # user_context = " ".join(context)
+    # print("The context is -" + str(type(context)))
+    filtered_context = await context_relevance_filter(request.query, context)
     # Example custom prompts
     chatbot_system_prompt = (
-        """You are an academic assistant chatbot. Your role is to answer questions based solely on the given context. 
-        If a question is outside the provided context, politely inform the user that you can only respond to questions within the given context. 
-        If someone asks about the chatbot, explain that you are an assistant designed to help users by answering academic and course-oriented questions."""
+        """You are an academic assistant chatbot. Your role is to answer questions based solely on the given content. 
+        If a question is outside the provided content, politely inform the user that the given query is outside the provided content but provide an answer based on intrinsic knowledge.
+        If someone asks about the chatbot or greets you, explain that you are an assistant designed to help users by answering academic and course-oriented questions. Do not mention irrelevant content."""
     )
+    # chatbot_system_prompt = (
+    #     """You are an AI responsible for assessing whether the provided content is relevant to a specific query. Carefully analyze the content and determine if it directly addresses or provides pertinent information related to the query. Only respond with "YES" if the content is relevant, or "NO" if it is not. Do not provide any explanations, scores, or additional text—just a single word: "YES" or "NO"."""
+    # )
+    print("FILTERED CONTEXT: " + filtered_context)
     chatbot_user_prompt = (
         f"""
-        Context: {context}
+        Content: {filtered_context}
 
         Query: {request.query}
         """
     )
+    response_preamble = ""
+    if filtered_context == " ":
+        response_preamble = "There is no specific information provided about this topic, but I can answer with my intrinsic knowledge as follows: "
     # Generate the response using the utility function
-    full_text = await generate_response(request, context, chatbot_system_prompt, chatbot_user_prompt)
-    print("FULL TEXT")
-    print(full_text)
+    full_text = await generate_response(request, filtered_context, chatbot_system_prompt, chatbot_user_prompt)
+
+    relevance_filtered_response = await response_relevance_filter_for_chatbot(request.query, full_text)
+
     response = {
-        "answer": full_text
+        "answer": response_preamble + relevance_filtered_response
     }    
     return response
+
+
+
+##################################################################################################################################################################
+#################################################################################################################################################################
+#################################################################################################################################################################
+# Helper methods for post-generation filtering
+
+async def response_relevance_filter_for_chatbot(query: str, response: str) -> str:
+    evaluate_system_prompt = (
+        """You are given a query and a response. Determine if the response is relevant, irrelevant or highly irrelevant to the query. Only respond with "Relevant", "Irrelevant" or "Highly Irrelevant"."""
+    )
+    evaluate_user_prompt = (
+        f"""
+        Query: {query}
+
+        Content: {response}
+        """
+    )
+    request = QueryRequest(query=query)
+    is_response_relevant = await generate_response(request, response, evaluate_system_prompt, evaluate_user_prompt)
+    print("RELEVANCE OUTCOME")
+    print(is_response_relevant)
+    if is_response_relevant.lower() == 'highly irrelevant':
+        return "Given that the answer that I am able to retrieve with the information I have seems to be highly irrelevant to the query, I abstain from providing a response. I am sorry for not being helpful." # Returns an empty coroutine
+    elif is_response_relevant.lower() == 'irrelevant':
+        return "The answer I am able to retrieve with the information I have seems to be irrelevant to the query. Nevertheless, I will provide you with the response in the hope that it will be valuable. Apologies in advance if it turns out to be of no value: " + response
+    return response
+
+
+async def response_relevance_filter_for_question_generation(query: str, response: str) -> str:
+    evaluate_system_prompt = (
+        """You are given a query and a response. Determine if the response is relevant, irrelevant or highly irrelevant to the query. Only respond with "Relevant", "Irrelevant" or "Highly Irrelevant"."""
+    )
+    evaluate_user_prompt = (
+        f"""
+        Query: {query}
+
+        Content: {response}
+        """
+    )
+    request = QueryRequest(query=query)
+    is_response_relevant = await generate_response(request, response, evaluate_system_prompt, evaluate_user_prompt)
+    print("RELEVANCE OUTCOME")
+    print(is_response_relevant)
+    if is_response_relevant.lower() == 'highly irrelevant':
+        return "Given that the answer that I am able to retrieve with the information I have seems to be highly irrelevant to the query, I abstain from providing a response. I am sorry for not being helpful." # Returns an empty coroutine
+    elif is_response_relevant.lower() == 'irrelevant':
+        return "The answer I am able to retrieve with the information I have seems to be irrelevant to the query. Nevertheless, I will provide you with the response in the hope that it will be valuable. Apologies in advance if it turns out to be of no value: " + response
+    return response
+
+async def response_relevance_filter_for_answer_generation(query: str, response: str) -> str:
+    evaluate_system_prompt = (
+        """You are given a query and a response. Determine if the response is relevant, irrelevant or highly irrelevant to the query. Only respond with "Relevant", "Irrelevant" or "Highly Irrelevant"."""
+    )
+    evaluate_user_prompt = (
+        f"""
+        Query: {query}
+
+        Content: {response}
+        """
+    )
+    request = QueryRequest(query=query)
+    is_response_relevant = await generate_response(request, response, evaluate_system_prompt, evaluate_user_prompt)
+    print("RELEVANCE OUTCOME")
+    print(is_response_relevant)
+    if is_response_relevant.lower() == 'highly irrelevant':
+        return "Given that the answer that I am able to retrieve with the information I have seems to be highly irrelevant to the query, I abstain from providing a response. I am sorry for not being helpful." # Returns an empty coroutine
+    elif is_response_relevant.lower() == 'irrelevant':
+        return "The answer I am able to retrieve with the information I have seems to be irrelevant to the query. Nevertheless, I will provide you with the response in the hope that it will be valuable. Apologies in advance if it turns out to be of no value: " + response
+    return response
+
+
+async def response_relevance_filter_for_faculty_evaluation(query: str, response: str) -> str:
+    evaluate_system_prompt = (
+        """You are given a query and a response. Determine if the response is relevant, irrelevant or highly irrelevant to the query. Only respond with "Relevant", "Irrelevant" or "Highly Irrelevant"."""
+    )
+    evaluate_user_prompt = (
+        f"""
+        Query: {query}
+
+        Content: {response}
+        """
+    )
+    request = QueryRequest(query=query)
+    is_response_relevant = await generate_response(request, response, evaluate_system_prompt, evaluate_user_prompt)
+    print("RELEVANCE OUTCOME")
+    print(is_response_relevant)
+    if is_response_relevant.lower() == 'highly irrelevant':
+        return "Given that the answer that I am able to retrieve with the information I have seems to be highly irrelevant to the query, I abstain from providing a response. I am sorry for not being helpful." # Returns an empty coroutine
+    elif is_response_relevant.lower() == 'irrelevant':
+        return "The answer I am able to retrieve with the information I have seems to be irrelevant to the query. Nevertheless, I will provide you with the response in the hope that it will be valuable. Apologies in advance if it turns out to be of no value: " + response
+    return response
+
+
+async def response_relevance_filter_for_grading_assistant(question: str, answer: str, evaluation: str) -> str:
+    evaluate_the_evaluation_for_aga_with_ground_truth_system_prompt = (
+        """You are given a question, answer and evaluation for that answer. Determine if the evalution is "correct" or "incorrect"."""
+    )
+    evaluate_the_evaluation_for_aga_with_ground_truth_user_prompt = (
+        f"""
+    Question: {question}
+
+    Answer: {answer}
+
+    Evaluation: {evaluation}
+
+    You are given a question, answer and evaluation for that answer. Determine if the evalution is "correct" or "incorrect". Answer only with "CORRECT" or "INCORRECT".
+        """
+    )
+    request = QueryRequest(query=answer)
+    is_response_relevant = await generate_response(request, evaluation, evaluate_the_evaluation_for_aga_with_ground_truth_system_prompt, evaluate_the_evaluation_for_aga_with_ground_truth_user_prompt)
+    print("RELEVANCE OUTCOME")
+    print(is_response_relevant)
+    if is_response_relevant.lower() == 'correct':
+        return evaluation
+    return "Due to lack of expertise, the system can not grade the answer."
+    
+
+##################################################################################################################################################################
+#################################################################################################################################################################
+#################################################################################################################################################################
+
 
 
 # @app.post("/api/ollamaAFE")
@@ -2485,6 +2707,9 @@ async def ollama_afe(request: QueryRequest):
             context = await make_request(query)
             if context is None:
                 raise HTTPException(status_code=500, detail="Failed to fetch context")
+            
+            # filtered_context_afe = await context_relevance_filter(query, context)
+
             # Example custom prompts
             afe_system_prompt = (
                 """
@@ -2532,6 +2757,9 @@ async def ollama_afe(request: QueryRequest):
             )
             # Generate the response using the utility function
             full_text = await generate_response(request, context, afe_system_prompt, afe_user_prompt)
+
+            # relevance_filtered_response_for_faculty_evaluation = await response_relevance_filter_for_faculty_evaluation(request.query, full_text)
+
             response = full_text
 
             pattern = rf'(score:\s*([\s\S]*?)(\d+)|\**{sub_dim_name}\**\s*:\s*(\d+))'
