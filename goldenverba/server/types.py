@@ -61,7 +61,7 @@ class QueryRequestWithGroundTruth(BaseModel):
     question: str
     answer: str
     ground_truth: str
-    rubric: str = None
+    rubric: str
     default_rubric: str = """Correctness: If the answer correctly answers the question, below are the details for different scores:
             - Score 0: the answer is completely incorrect, doesn't mention anything about the question or is completely contrary to the correct answer.
                 - For example, when asked “How to terminate a databricks cluster”, the answer is an empty string, or content that's completely irrelevant, or sorry I don't know the answer.
@@ -171,6 +171,8 @@ class Course(BaseModel):
 class RequestAGA(BaseModel):
     course_shortname : str
     assignment_name : str
+    ground_truth: str
+    rubric: str
 
 
 class TokenWithRoles(BaseModel):
