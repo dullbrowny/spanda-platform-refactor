@@ -12,7 +12,6 @@ import ollama
 import aiohttp
 import os
 from pathlib import Path
-
 from dotenv import load_dotenv
 from starlette.websockets import WebSocketDisconnect
 from wasabi import msg  # type: ignore[import]

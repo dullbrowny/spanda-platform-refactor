@@ -2695,16 +2695,18 @@ async def ollama_afe(request: QueryRequest):
         all_responses[dimension] = {}
 
         for sub_dim_name, sub_dim_data in sub_dimensions.items():
-            query = f"""
-            Evaluate the {sub_dim_name.lower()} of the instructor "{instructor_name}" based on the following criteria:
-            Definition: {sub_dim_data['definition']}
-            Example: {sub_dim_data['example']}
-            Criteria:
-            {json.dumps(sub_dim_data['criteria'], indent=4)}
-            Provide a score between 1 and 5 based on the criteria.
-            """
+            query = f"""Judge {instructor_name} based on {sub_dim_name}."""
+            # query = f"""
+            # Evaluate the {sub_dim_name.lower()} of the instructor "{instructor_name}" based on the following criteria:
+            # Definition: {sub_dim_data['definition']}
+            # Example: {sub_dim_data['example']}
+            # Criteria:
+            # {json.dumps(sub_dim_data['criteria'], indent=4)}
+            # Provide a score between 1 and 5 based on the criteria.
+            # """
             # Extract context
             context = await make_request(query)
+            print(context)
             if context is None:
                 raise HTTPException(status_code=500, detail="Failed to fetch context")
             
@@ -2712,47 +2714,79 @@ async def ollama_afe(request: QueryRequest):
 
             # Example custom prompts
             afe_system_prompt = (
-                """
+                f"""
                 ### Instructions
 
-                Evaluate the teacher's performance based on the criterion: **{sub_dim_name}** - {explanation}.
+                Evaluate the teacher's performance based on the criterion: **{sub_dim_name}** - {sub_dim_data}.
 
                 #### Evaluation Details
 
-                - **Focus:** Only use the provided video transcript.
+                - **Focus:** Only use the provided textual transcript.
                 - **Ignore:** Interruptions from student entries/exits and notifications of participants joining or leaving the meeting.
                 - **Scoring:** Assign scores from 1 to 5.
 
                 #### Criteria
 
-                - **Criterion Explanation:** {explanation}
+                - **Criterion Explanation:** {sub_dim_data}
                 - If the transcript does not provide enough information to assess **{sub_dim_name}**, score as **N/A** and explain why.
                 - Justify any score below 5 with clear reasoning.
-
-                #### Output Format
-
-                - **{sub_dim_name}:** score_obtained: score (1-5 or N/A) - Note: No special formatting should be used here.
-
-                - **Detailed Explanation with Examples:**
-                - Example 1: "[Quoted text from transcript]" [Description] [Timestamp]
-                - Example 2: "[Quoted text from transcript]" [Description] [Timestamp]
-                - Example 3: "[Quoted text from transcript]" [Description] [Timestamp]
-                - ...
-
-                - Provide both positive and negative examples. 
-                - Highlight poor examples if the score is below 5.
-                - Consider the context of statements as context is crucial.
-
-                Rate strictly on a scale of 1 to 5, using whole numbers only. Ensure examples are directly relevant to the evaluation criterion.
                 """
             )
+            # afe_user_prompt = (
+            #     f"""
+            #     Here are given transcript snippets for {instructor_name}-   
+
+            #         [TRANSCRIPT START]
+            #         {filtered_context_afe}
+            #         [TRANSCRIPT END]
+
+            #     Please provide an evaluation of the teacher named '{instructor_name}' on the following criteria: '{sub_dim_name}'. Only include information from transcripts where '{instructor_name}' is the instructor. If the instructor's name is not present in the transcript, clearly mention that and do not evaluate.
+                
+            #     #### Output Format
+
+            #     - **{sub_dim_name}:** score_obtained: score (1-5 or N/A) - Note: No special formatting should be used here.
+
+            #     - **Detailed Explanation with Examples:**
+            #     - Example 1: "[Quoted text from transcript]" [Description] [Timestamp]
+            #     - Example 2: "[Quoted text from transcript]" [Description] [Timestamp]
+            #     - Example 3: "[Quoted text from transcript]" [Description] [Timestamp]
+            #     - ...
+
+            #     - Provide both positive and negative examples. 
+            #     - Highlight poor examples if the score is below 5.
+            #     - Consider the context of statements as context is crucial.
+
+            #     Rate strictly on a scale of 1 to 5, using whole numbers only. Ensure examples are directly relevant to the evaluation criterion.
+            #     """
+            # )
             afe_user_prompt = (
                 f"""
                 Here are given transcript snippets for {instructor_name}-   
+
                     [TRANSCRIPT START]
                     {context}
                     [TRANSCRIPT END]
-                Please provide an evaluation of the teacher named '{instructor_name}' on the following criteria: '{sub_dim_name}'. Only include information from transcripts where '{instructor_name}' is the instructor.
+
+                 ### Instructions
+
+                Evaluate the teacher's performance based on the criterion: **{sub_dim_name}** - {sub_dim_data}.
+
+                #### Evaluation Details
+
+                - **Focus:** Only use the provided textual transcript.
+                - **Ignore:** Interruptions from student entries/exits and notifications of participants joining or leaving the meeting.
+                - **Scoring:** Assign scores from 1 to 5.
+
+                #### Criteria
+
+                - **Criterion Explanation:** {sub_dim_data}
+                - If the transcript does not provide enough information to assess **{sub_dim_name}**, score as **N/A** and explain why.
+                - Justify any score below 5 with clear reasoning.
+
+                #### Output format
+
+                -The score for {sub_dim_name} must be in the format:
+                    spanda_{sub_dim_name}: followed by the score.
                 """
             )
             # Generate the response using the utility function
@@ -2862,46 +2896,82 @@ async def upload_transcript(payload: ImportPayload):
     
 @app.post("/api/evaluate_Transcipt")
 async def evaluate_Transcipt(request: QueryRequest):
+    # dimensions = {
+    #     "Communication Clarity": "The ability to convey information and instructions clearly and effectively so that students can easily understand the material being taught.\n"
+    #                              "0: Instructions are often vague or confusing, leading to frequent misunderstandings among students.\n"
+    #                              "Example: 'Read the text and do the thing.'\n"
+    #                              "1: Occasionally provides clear instructions but often lacks detail, requiring students to ask for further clarification.\n"
+    #                              "Example: 'Read the chapter and summarize it.'\n"
+    #                              "2: Generally clear and detailed in communication, though sometimes slightly ambiguous.\n"
+    #                              "Example: 'Read chapter 3 and summarize the main points in 200 words.'\n"
+    #                              "3: Always communicates instructions and information clearly, precisely, and comprehensively, ensuring students fully understand what is expected.\n"
+    #                              "Example: 'Read chapter 3, identify the main points, and write a 200-word summary. Make sure to include at least three key arguments presented by the author.'",
+
+    #     "Punctuality": "Consistently starting and ending classes on time, as well as meeting deadlines for assignments and other class-related activities.\n"
+    #                 "0: Frequently starts and ends classes late, often misses deadlines for assignments and class-related activities.\n"
+    #                 "Example: Class is supposed to start at 9:00 AM but often begins at 9:15 AM, and assignments are returned late.\n"
+    #                 "1: Occasionally late to start or end classes and sometimes misses deadlines.\n"
+    #                 "Example: Class sometimes starts a few minutes late, and assignments are occasionally returned a day late.\n"
+    #                 "2: Generally punctual with minor exceptions, mostly meets deadlines.\n"
+    #                 "Example: Class starts on time 90%' of the time, and assignments are returned on the due date.\n"
+    #                 "3: Always starts and ends classes on time, consistently meets deadlines for assignments and other activities.\n"
+    #                 "Example: Class starts exactly at 9:00 AM every day, and assignments are always returned on the specified due date.",
+
+    #     "Positivity": "Maintaining a positive attitude, providing encouragement, and fostering a supportive and optimistic learning environment.\n"
+    #                 "0: Rarely displays a positive attitude, often appears disengaged or discouraging.\n"
+    #                 "Example: Rarely smiles or offers encouragement, responds negatively to student questions.\n"
+    #                 "1: Occasionally positive, but can be inconsistent in attitude and support.\n"
+    #                 "Example: Sometimes offers praise but often seems indifferent.\n"
+    #                 "2: Generally maintains a positive attitude and provides encouragement, though with occasional lapses.\n"
+    #                 "Example: Usually offers praise and support but has off days.\n"
+    #                 "3: Consistently maintains a positive and encouraging attitude, always fostering a supportive and optimistic environment.\n"
+    #                 "Example: Always greets students warmly, frequently provides positive feedback and encouragement.",
+    # }
     dimensions = {
-        "Communication Clarity": "The ability to convey information and instructions clearly and effectively so that students can easily understand the material being taught.\n"
-                                 "0: Instructions are often vague or confusing, leading to frequent misunderstandings among students.\n"
-                                 "Example: 'Read the text and do the thing.'\n"
-                                 "1: Occasionally provides clear instructions but often lacks detail, requiring students to ask for further clarification.\n"
-                                 "Example: 'Read the chapter and summarize it.'\n"
-                                 "2: Generally clear and detailed in communication, though sometimes slightly ambiguous.\n"
-                                 "Example: 'Read chapter 3 and summarize the main points in 200 words.'\n"
-                                 "3: Always communicates instructions and information clearly, precisely, and comprehensively, ensuring students fully understand what is expected.\n"
-                                 "Example: 'Read chapter 3, identify the main points, and write a 200-word summary. Make sure to include at least three key arguments presented by the author.'",
-
-        "Punctuality": "Consistently starting and ending classes on time, as well as meeting deadlines for assignments and other class-related activities.\n"
-                    "0: Frequently starts and ends classes late, often misses deadlines for assignments and class-related activities.\n"
-                    "Example: Class is supposed to start at 9:00 AM but often begins at 9:15 AM, and assignments are returned late.\n"
-                    "1: Occasionally late to start or end classes and sometimes misses deadlines.\n"
-                    "Example: Class sometimes starts a few minutes late, and assignments are occasionally returned a day late.\n"
-                    "2: Generally punctual with minor exceptions, mostly meets deadlines.\n"
-                    "Example: Class starts on time 90%' of the time, and assignments are returned on the due date.\n"
-                    "3: Always starts and ends classes on time, consistently meets deadlines for assignments and other activities.\n"
-                    "Example: Class starts exactly at 9:00 AM every day, and assignments are always returned on the specified due date.",
-
-        "Positivity": "Maintaining a positive attitude, providing encouragement, and fostering a supportive and optimistic learning environment.\n"
-                    "0: Rarely displays a positive attitude, often appears disengaged or discouraging.\n"
-                    "Example: Rarely smiles or offers encouragement, responds negatively to student questions.\n"
-                    "1: Occasionally positive, but can be inconsistent in attitude and support.\n"
-                    "Example: Sometimes offers praise but often seems indifferent.\n"
-                    "2: Generally maintains a positive attitude and provides encouragement, though with occasional lapses.\n"
-                    "Example: Usually offers praise and support but has off days.\n"
-                    "3: Consistently maintains a positive and encouraging attitude, always fostering a supportive and optimistic environment.\n"
-                    "Example: Always greets students warmly, frequently provides positive feedback and encouragement.",
+        "Mastery of the Subject":{
+                "Knowledge of Content and Pedagogy": "A deep understanding of their subject matter and the best practices for teaching it. Example - In a mathematics course on real analysis, the professor demonstrates best practices by Guiding students through the process of constructing formal proofs step-by-step, highlighting common pitfalls and techniques for overcoming them.",
+                "Breadth of Coverage": "Awareness of different possible perspectives related to the topic taught. Example - Teacher discusses different theoretical views, current and prior scientific developments, etc.",
+                "Knowledge of Resources": "Awareness of and utilization of a variety of current resources in the subject area to enhance instruction. Example - The teacher cites recent research studies or books while explaining relevant concepts."
+        },
+        "Expository Quality":{
+                "Content Clarity": "Extent to which the teacher is able to explain the content to promote clarity and ease of understanding. Example - Teacher uses simple vocabulary and concise sentences to explain complex concepts.",
+                "Communication Clarity": "The ability of the teacher to effectively convey information and instructions to students in a clear and understandable manner. Example - The teacher’s voice and language is clear with the use of appropriate voice modulation, tone, and pitch to facilitate ease of understanding."
+        },
+        "Structuring of Objectives and Content":{
+                "Organization": "The extent to which content is presented in a structured and comprehensive manner with emphasis on important content and proper linking content. Example - Teacher starts the class by providing an outline of what all will be covered in that particular class and connects it to previous knowledge of learners.",
+                "Clarity of Instructional Objectives": "The clarity and specificity of the learning objectives communicated to students, guiding the focus and direction of instruction. Example - At the start of the lesson, the teacher displays the learning objectives and takes a few moments to explain them to the students."
+        },
+        "Qualities of Interaction":{
+                "Instructor Enthusiasm And Positive demeanor": "Extent to which a teacher is enthusiastic and committed to making the course interesting, active, dynamic, humorous, etc. Example - Teacher uses an interesting fact or joke to engage the class."
+        }
     }
 
     instructor_name = request.query
     all_responses = {}
     all_scores = {}
 
-    for dimension, explanation in dimensions.items():
-        query = f"Judge document name {instructor_name} based on {dimension}."
-        context = await make_request(query)  # Assuming make_request is defined elsewhere
-        result_responses, result_scores = await instructor_eval(instructor_name, context, dimension, explanation)
+    # for dimension, explanation in dimensions.items():
+    #     query = f"Judge document name {instructor_name} based on {dimension}."
+    #     context = await make_request(query)  # Assuming make_request is defined elsewhere
+    #     result_responses, result_scores = await instructor_eval(instructor_name, context, dimension, explanation)
+
+    #     # Log the raw outputs for debugging
+    #     print(f"Dimension: {dimension}")
+    #     print(f"Raw Result Responses: {result_responses}")
+    #     print(f"Raw Result Scores: {result_scores}")
+
+    #     # Safely access and store the responses and scores
+    #     all_responses[dimension] = result_responses.get('content', "No response available")
+    #     all_scores[dimension] = result_scores.get(dimension, "No score available")
+
+
+    for dimension, sub_traits_and_explanations in dimensions.items():
+
+        for sub_trait, explanation_of_subtrait in sub_traits_and_explanations.items():
+            query = f"Judge document name {instructor_name} based on {sub_trait}."
+            context = await make_request(query)  # Assuming make_request is defined elsewhere
+            
+        result_responses, result_scores = await instructor_eval(instructor_name, context, sub_trait, explanation_of_subtrait)
 
         # Log the raw outputs for debugging
         print(f"Dimension: {dimension}")
