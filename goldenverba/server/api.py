@@ -1598,9 +1598,23 @@ def extract_qa_pairs(text):
         return [text.strip()]
     return [pair.strip() for pair in qa_pairs]
 
+def split_qa_pair(qa_pair):
+    # Define regex patterns to match question and answer
+    question_pattern = re.compile(r'Q\d+:\s(.*?)(?=\nA\d+:)', re.DOTALL)
+    answer_pattern = re.compile(r'A\d+:\s(.*)', re.DOTALL)
+    
+    # Find question and answer using regex patterns
+    question_match = question_pattern.search(qa_pair)
+    answer_match = answer_pattern.search(qa_pair)
+    
+    # Extract and return question and answer
+    question = question_match.group(1).strip() if question_match else None
+    answer = answer_match.group(1).strip() if answer_match else None
+    
+    return question, answer
 
 # Function to send Q&A pair to grading endpoint and get response
-async def process_user_submissions(user, submissions_by_user, activity_type):
+async def process_user_submissions(user, submissions_by_user, activity_type, rubric_payload, ground_truth_payload):
     user_id = user['id']
     user_fullname = user['fullname']
     user_email = user['email']
@@ -1629,20 +1643,21 @@ async def process_user_submissions(user, submissions_by_user, activity_type):
                             qa_pairs = extract_qa_pairs(text)
                             print("QAPAIRS", qa_pairs)
                             for i, qa_pair in enumerate(qa_pairs):
+                                 
                                 try:
-                                    # Convert the dictionary to QueryRequest instance
-                                    query_request = QueryRequest(query=qa_pair)
+                                    question_req, answer_req = split_qa_pair(qa_pair)
+                                    query_request_rubric= QueryRequestWithGroundTruth(question=question_req,answer=answer_req,rubric=rubric_payload,ground_truth=ground_truth_payload)
                                     
-                                    # Call the OllamaGA function directly
-                                    result = await ollama_aga(query_request)
-                                    justification = result.get("justification")
-                                    avg_score = result.get("average_score")
-                                    total_score += avg_score
+                                    query_request = QueryRequest(query=qa_pair)
+                                    result_feedback = await ollama_aga_with_ground_truth(query_request_rubric)
+                                   
+                                    justification = result_feedback
+                                    # result = await ollama_aga(query_request)
+                                    # avg_score = result.get("average_score")
+                                    # total_score += avg_score
                                     comment = f"Q{i+1}: {justification}"
                                     all_comments.append(comment)
 
-                                    print(f"  Graded Q{i+1}: Avg. Score = {avg_score:.2f} - {justification}")
-                                    
                                 except Exception as e:
                                     print(f"  Error grading Q&A pair {i+1} for {user_fullname}: {str(e)}")
                         except Exception as e:
@@ -1653,7 +1668,7 @@ async def process_user_submissions(user, submissions_by_user, activity_type):
         "Full Name": user_fullname,
         "User ID": user_id,
         "Email": user_email,
-        "Total Score": total_score,
+        # "Total Score": total_score,
         "Feedback": feedback
     }
 
@@ -1747,7 +1762,7 @@ def update_grade(user_id, assignment_id, grade, feedback):
     print(f"Grade updated for User ID: {user_id}, Status: {response}")
 
 # Main function to integrate with Moodle
-async def moodle_integration_pipeline(course_shortname, assignment_name, activity_type):
+async def moodle_integration_pipeline(course_shortname, assignment_name, activity_type, rubric, ground_truth):
     try:
 
         print(f"\n=== Fetching Course Details for Shortname: {course_shortname} ===")
@@ -1793,7 +1808,7 @@ async def moodle_integration_pipeline(course_shortname, assignment_name, activit
 
         # Processing submissions
         print("\n=== Processing Submissions ===")
-        tasks = [process_user_submissions(user, submissions_by_user, activity_type) for user in users]
+        tasks = [process_user_submissions(user, submissions_by_user, activity_type, rubric, ground_truth) for user in users]
         processed_data = await asyncio.gather(*tasks)
 
         # Writing data to CSV
@@ -1876,9 +1891,11 @@ async def grade_assignment(request: RequestAGA):
     course_shortname = request.course_shortname
     assignment_name = request.assignment_name
     activity_type = "assignment"
+    rubric=request.rubric
+    ground_truth=request.ground_truth 
 
     try:
-        processed_data = await moodle_integration_pipeline(course_shortname, assignment_name, activity_type)
+        processed_data = await moodle_integration_pipeline(course_shortname, assignment_name, activity_type, rubric, ground_truth)
         return JSONResponse(content={"status": "success", "message": "Grading completed successfully", "data": processed_data})
     except Exception as e:
         return JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
@@ -1899,13 +1916,11 @@ async def grade_assignment(request: RequestAGA, token: str = Depends(oauth2_sche
         return JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
 
 
-
-
-
-
 @app.post("/api/ollamaAGA_with_ground_truth")
 async def ollama_aga_with_ground_truth(request: QueryRequestWithGroundTruth):
 
+    print("tttttttttttttt",request.question)
+    print("pppppppppppppp",request.answer)
     if request.rubric == None:
         request.rubric = request.default_rubric
     # TO;DO - Need to verify if constraing context to just the ground truth peanalizes the student unnecessarily.
