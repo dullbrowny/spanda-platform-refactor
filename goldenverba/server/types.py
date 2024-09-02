@@ -168,10 +168,11 @@ class TokenData(BaseModel):
 class Course(BaseModel):
     id: int
     fullname: str  # Updated field name to match the data
+
 class RequestAGA(BaseModel):
     course_shortname : str
     assignment_name : str
-    ground_truth: str
+    ground_truth: str = ""
     rubric: str
 
 

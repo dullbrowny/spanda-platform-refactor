@@ -1651,10 +1651,10 @@ async def process_user_submissions(user, submissions_by_user, activity_type, rub
                                     query_request = QueryRequest(query=qa_pair)
                                     result_feedback = await ollama_aga_with_ground_truth(query_request_rubric)
                                    
-                                    justification = result_feedback
+                                    justification = result_feedback["justification"]
                                     # result = await ollama_aga(query_request)
                                     # avg_score = result.get("average_score")
-                                    # total_score += avg_score
+                                    total_score += result_feedback["score"]
                                     comment = f"Q{i+1}: {justification}"
                                     all_comments.append(comment)
 
@@ -1668,7 +1668,7 @@ async def process_user_submissions(user, submissions_by_user, activity_type, rub
         "Full Name": user_fullname,
         "User ID": user_id,
         "Email": user_email,
-        # "Total Score": total_score,
+        "Total Score": total_score,
         "Feedback": feedback
     }
 
@@ -1921,13 +1921,21 @@ async def ollama_aga_with_ground_truth(request: QueryRequestWithGroundTruth):
 
     print("tttttttttttttt",request.question)
     print("pppppppppppppp",request.answer)
+    if request.ground_truth == "":
+        request.ground_truth = await make_request(request.question)
+        print("stage 1")
+        print(request.ground_truth)
+        request.ground_truth = await context_relevance_filter(request.question, request.ground_truth)
+        print("stage 2")        
+        print(request.ground_truth)
+
     if request.rubric == None:
         request.rubric = request.default_rubric
     # TO;DO - Need to verify if constraing context to just the ground truth peanalizes the student unnecessarily.
 
     aga_with_ground_truth_system_prompt = (
         f"""Please act as an impartial judge and evaluate the quality of the provided answer which attempts to answer the provided question based on the provided rubric for evaluation.
-            You'll be given rubric, question and answer to submit your reasoning and score.
+            You'll be given rubric, question and answer to submit your reasoning and score. If ground truth is not provided, use your intrinsic knowledge to grade the answer.
         """
     )
     aga_with_ground_truth_user_prompt = (
@@ -1943,7 +1951,13 @@ async def ollama_aga_with_ground_truth(request: QueryRequestWithGroundTruth):
     Do NOT grade the Model answer. The model answer is only for reference. Grade only the 
     
     Grade the following user answer -
-    User answer: {request.answer}"""
+    User answer: {request.answer}.
+
+    The spanda_final_score should strictly reflect the raw score that the individual received based on the rubric's standards. For example, if the rubric specifies a total of 30 marks and the individual earned 15 marks, then the spanda_final_score must be 15. There should be no scaling, conversion to percentages, or any other adjustments to the score.
+    
+    Please provide the final score according to the rubric in the following format:
+
+    spanda_final_score = <score>"""
     )
 
     print("OVERALL PROMPT FOR LLM")
@@ -1951,10 +1965,27 @@ async def ollama_aga_with_ground_truth(request: QueryRequestWithGroundTruth):
 
     structure_for_generate_query = QueryRequest(query = request.answer)
     graded_response = await generate_response(structure_for_generate_query, request.ground_truth, aga_with_ground_truth_system_prompt, aga_with_ground_truth_user_prompt)
-    
-    relevance_filtered_response_for_aga_with_ground_truth = await response_relevance_filter_for_grading_assistant(request.question, request.answer, graded_response)   
 
-    return relevance_filtered_response_for_aga_with_ground_truth
+    relevance_filtered_response_for_aga_with_ground_truth = await response_relevance_filter_for_grading_assistant(request.question, request.answer, graded_response)   
+    final_score = None
+    # Regex pattern to match the score
+    pattern = r"spanda_final_score\s*=\s*(\d+)"
+
+    # Search for the pattern in the text
+    match = re.search(pattern, graded_response)
+
+    if match:
+        final_score = int(match.group(1))
+        print(f"The final score is: {final_score}")
+    else:
+        print("Final score not found.")
+
+    response = {
+        "justification": relevance_filtered_response_for_aga_with_ground_truth,
+        "score": final_score
+    }    
+    return response
+    # return relevance_filtered_response_for_aga_with_ground_truth
     # return graded_response
 
 
