@@ -126,7 +126,8 @@ class QueryRequestWithGroundTruth(BaseModel):
 
 
 class QueryRequestResume(BaseModel):
-    query: list[str]
+    resume: str
+    jd: str
     course_id: str = None
 
 class QueryRequestaqg(BaseModel):

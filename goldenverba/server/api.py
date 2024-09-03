@@ -1028,12 +1028,12 @@ async def make_request(query_user):
 #     # Return only the relevant content without any metadata
 #     return {"content": content}, scores_dict
 
-async def instructor_eval(instructor_name, context, score_criterion, explanation):
+async def instructor_eval(transcript, context, score_criterion, explanation):
     # Ensure score_criterion is hashable by converting it to a string if necessary
     score_criterion = str(score_criterion)
 
-    # Define the criterion to evaluate
-    user_context = "".join(context)
+    # # Define the criterion to evaluate
+    # user_context = "".join(context)
 
     # Initialize empty dictionaries to store relevant responses and scores
     responses = {}
@@ -1045,7 +1045,7 @@ async def instructor_eval(instructor_name, context, score_criterion, explanation
             You are tasked with evaluating a teacher's performance based on the criterion: {score_criterion} - {explanation}.
 
         -Evaluation Details:
-            -Focus exclusively on the provided video transcript.
+            -Focus exclusively on the provided textual transcript.
             -Ignore interruptions from student entries/exits and notifications of participants 'joining' or 'leaving' the meeting.
             -Assign scores from 1 to 5:
         -Criteria:
@@ -1062,37 +1062,27 @@ async def instructor_eval(instructor_name, context, score_criterion, explanation
     output_format = f"""Strictly follow the output format-
         -Output Format:
             -{score_criterion}: Score(range of 1 to 5, or N/A) - note: Do not use bold or italics or any formatting in this line.
-
-            -Detailed Explanation with Examples and justification for examples:
-                -Example 1: "[Quoted text from transcript]" [Description] [Timestamp]
-                -Example 2: "[Quoted text from transcript]" [Description] [Timestamp]
-                -Example 3: "[Quoted text from transcript]" [Description] [Timestamp]
-                -...
-                -Example n: "[Quoted text from transcript]" [Description] [Timestamp]
-            -Include both positive and negative instances.
-            -Highlight poor examples if the score is not ideal."""
+            """
     
-    system_message = """You are a judge. The judge gives helpful, detailed, and polite suggestions for improvement for a particular teacher from the given context - the context contains transcripts of videos. The judge should also indicate when the judgment can be found in the context."""
+    # system_message = """You are a judge. The judge gives helpful, detailed, and polite suggestions for improvement for a particular teacher from the given context - the context contains transcripts of videos. The judge should also indicate when the judgment can be found in the context."""
     
-    formatted_transcripts = f"""Here are the transcripts for {instructor_name}-   
-                    [TRANSCRIPT START]
-                    {user_context}
-                    [TRANSCRIPT END]"""
+    formatted_transcripts = f"""Evaluate the following transcript based on {score_criterion}:
+    Transcript -
+      {transcript} """
     
-    user_prompt = f"""Please provide an evaluation of the teacher named '{instructor_name}' on the following criteria: '{score_criterion}'. Only include information from transcripts where '{instructor_name}' is the instructor."""
 
     afe_new_system_prompt = (
         f""" 
-        {system_message}
+        {evaluate_instructions}
         """
     )
     afe_new_user_prompt = (
         f"""
-        {formatted_transcripts} + "/n/n" + {evaluate_instructions} + "/n/n" + {user_prompt} + "/n/n" + {output_format}
+        {formatted_transcripts} + "/n/n" + {output_format}
         """
     )
     # Correct request creation
-    request_obj = QueryRequest(query=instructor_name)  # Adjust to the correct instantiation if necessary
+    request_obj = QueryRequest(query=transcript)  # Adjust to the correct instantiation if necessary
     
     # Generate the response using the utility function
     full_text = await generate_response(request_obj, context, afe_new_system_prompt, afe_new_user_prompt)
@@ -2997,9 +2987,9 @@ async def evaluate_Transcipt(request: QueryRequest):
         }
     }
 
-    instructor_name = request.query
+    transcript = request.query
     all_responses = {}
-    sub_scores_dict = {}
+    # sub_scores_dict = {}
     master_scores_dict = {}
 
     # for dimension, explanation in dimensions.items():
@@ -3022,11 +3012,12 @@ async def evaluate_Transcipt(request: QueryRequest):
         count_of_subtrait = 0
         sum_of_all_sub_trait_scores = 0
         for sub_trait, explanation_of_subtrait in sub_traits_and_explanations.items():
-            query = f"Judge document name {instructor_name} based on {sub_trait}."
+            query = f"Evaluate the transcript - {transcript} based on {sub_trait}."
             # retrieving context
-            context = await make_request(query)  # Assuming make_request is defined elsewhere
+            context = ""
+            # context = await make_request(query)  # Assuming make_request is defined elsewhere
             # retrieving feedback and computing score for the sub-dimension
-            result_response, result_score = await instructor_eval(instructor_name, context, sub_trait, explanation_of_subtrait)
+            result_response, result_score = await instructor_eval(query, context, sub_trait, explanation_of_subtrait)
             sum_of_all_sub_trait_scores += int(result_score)
             count_of_subtrait += 1
 
@@ -3053,73 +3044,76 @@ async def evaluate_Transcipt(request: QueryRequest):
 
     return response
 
-async def resume_eval(resume_name, jd_name, context, score_criterion, explanation):
-    user_context = "".join(context)
+async def resume_eval(afe_resume_analysis_system_message, afe_resume_analysis_user_prompt, score_criterion):
+    # user_context = "".join(context)
     responses = {}
     scores_dict = {}
 
-    evaluate_instructions = f"""
-        [INST]
-        -Instructions:
-            You are tasked with evaluating a resume named {resume_name} in comparison to a job description named {jd_name} based on the criterion: {score_criterion} - {explanation}.
+    # evaluate_instructions = f"""
+    #     [INST]
+    #     -Instructions:
+    #         You are tasked with evaluating a resume in comparison to a job description based on the criterion: {score_criterion} - {explanation}.
 
-        -Evaluation Details:
-            -Focus exclusively on the provided resume and job description.
-            -Assign scores from 0 to 3:
-                0: Poor performance
-                1: Average performance
-                2: Good performance
-                3: Exceptional performance
-        -Criteria:
-            -Criterion Explanation: {explanation}
-            -If the resume and job description lack sufficient information to judge {score_criterion}, mark it as N/A and provide a clear explanation.
-            -Justify any score that is not a perfect 3.
+    #     -Evaluation Details:
+    #         -Focus exclusively on the provided resume and job description.
+    #         -Assign scores from 0 to 3:
+    #             0: Poor performance
+    #             1: Average performance
+    #             2: Good performance
+    #             3: Exceptional performance
+    #     -Criteria:
+    #         -Criterion Explanation: {explanation}
+    #         -If the resume and job description lack sufficient information to judge {score_criterion}, mark it as N/A and provide a clear explanation.
+    #         -Justify any score that is not a perfect 3.
 
-        Strictly follow the output format-
-        -Output Format:
-            -{score_criterion}: Score: score(range of 0 to 3, or N/A)
+    #     Strictly follow the output format-
+    #     -Output Format:
+    #         -{score_criterion}: Score: score(range of 0 to 3, or N/A)
 
-            -Detailed Explanation with Examples and justification for examples:
-                -Example 1: "[Quoted text from resume/job description]" [Description]
-                -Example 2: "[Quoted text from resume/job description]" [Description]
-                -Example 3: "[Quoted text from resume/job description]" [Description]
-                -...
-                -Example n: "[Quoted text from resume/job description]" [Description]
-            -Include both positive and negative instances.
-            -Highlight poor examples if the score is not ideal.
+    #         -Detailed Explanation with Examples and justification for examples:
+    #             -Example 1: "[Quoted text from resume/job description]" [Description]
+    #             -Example 2: "[Quoted text from resume/job description]" [Description]
+    #             -Example 3: "[Quoted text from resume/job description]" [Description]
+    #             -...
+    #             -Example n: "[Quoted text from resume/job description]" [Description]
+    #         -Include both positive and negative instances.
+    #         -Highlight poor examples if the score is not ideal.
 
-            -Consider the context surrounding the example statements, as the context in which a statement is made is extremely important.
+    #         -Consider the context surrounding the example statements, as the context in which a statement is made is extremely important.
 
-            Rate strictly on a scale of 0 to 3 using whole numbers only.
+    #         Rate strictly on a scale of 0 to 3 using whole numbers only.
 
-            Ensure the examples are directly relevant to the evaluation criterion and discard any irrelevant excerpts.
-        [/INST]
-    """
-    system_message = """This is a chat between a user and a judge. The judge gives helpful, detailed, and polite suggestions for improvement for a candidate's resume based on the given context - the context contains resumes and job descriptions. The assistant should also indicate when the judgement be found in the context."""
+    #         Ensure the examples are directly relevant to the evaluation criterion and discard any irrelevant excerpts.
+    #     [/INST]
+    # """
+    # system_message = """This is a chat between a user and a judge. The judge gives helpful, detailed, and polite suggestions for improvement for a candidate's resume based on the given context - the context contains resumes and job descriptions. The assistant should also indicate when the judgement be found in the context."""
 
-    formatted_context = f"""Here are given documents:
-                    [RESUME START]
-                    {user_context}
-                    [RESUME END]
-                    [JOB DESCRIPTION START]
-                    {user_context}
-                    [JOB DESCRIPTION END]"""
+    # formatted_context = f"""Here are given documents:
+    #                 [RESUME START]
+    #                 {user_context}
+    #                 [RESUME END]
+    #                 [JOB DESCRIPTION START]
+    #                 {user_context}
+    #                 [JOB DESCRIPTION END]"""
 
-    user_prompt = f"""Please provide an evaluation of the resume named '{resume_name}' in comparison to the job description named '{jd_name}' on the following criteria: '{score_criterion}'. Only include information from the provided documents."""
+    # user_prompt = f"""Please provide an evaluation of the resume named '{resume_name}' in comparison to the job description named '{jd_name}' on the following criteria: '{score_criterion}'. Only include information from the provided documents."""
 
     resume_system_prompt = (
         f"""
-        {system_message}
+        {afe_resume_analysis_system_message}
         """
     )
     resume_user_prompt = (
         f"""
-        {formatted_context} + "/n/n" + {evaluate_instructions} + "/n/n" + {user_prompt} + " Strictly follow the format of output provided."
+        {afe_resume_analysis_user_prompt}
+        
+        Strictly follow the output format-
+          -{score_criterion}: Score: score(range of 0 to 3, or N/A)
         """
     )
     # Create a QueryRequest object
-    query_request = QueryRequest(query=f"{resume_name}, {jd_name}")
-
+    query_request = QueryRequest(query=f"Judge the Resume based on the Job Description.")
+    context = ""
     # Properly calling generate_response with all required arguments
     full_text = await generate_response(
         query_request,  # Pass the QueryRequest object
@@ -3156,14 +3150,10 @@ def extract_score(response_content):
 
 @app.post("/api/evaluate_Resume")
 async def evaluate_Resume(request: QueryRequestResume):
-    if len(request.query) != 2:
-        raise HTTPException(status_code=400, detail="Invalid request format. Expected two items in the query list.")
-    
-    resume_name, jd_name = request.query
     print("RESUME")
-    print(resume_name)
+    print(request.resume)
     print("JD")
-    print(jd_name)
+    print(request.jd)
     
     dimensions = {
         "Qualification Match": "The extent to which the candidate's educational background, certifications, and experience align with the specific requirements outlined in the job description.\n"
@@ -3217,10 +3207,26 @@ async def evaluate_Resume(request: QueryRequestResume):
     all_scores = {}
 
     for dimension, explanation in dimensions.items():
-        query = f"Judge Resume named {resume_name} in comparison to Job Description named {jd_name} based on {dimension}."
-        context = await make_request(query)  # Assuming make_request is defined elsewhere to get the context
+        afe_resume_analysis_user_prompt = f"""
+        Please use the following Job Description as a basis:
 
-        result_responses, result_scores = await resume_eval(resume_name, jd_name, context, dimension, explanation)
+        {request.jd} 
+         
+        
+        Compare the above Job Description with the below resume:
+
+        {request.resume}
+        
+
+        Examples for the dimension - {explanation}
+        Compare the given Job Description and resume based on {dimension}. 
+         """
+        
+        afe_resume_analysis_system_message = """As an expert in resume and job description analysis, your task is to conduct a thorough evaluation of the provided resume against the job description. The goal is to determine the alignment between the candidate's qualifications, experience, and skills with the requirements and expectations outlined in the job description."""
+
+        # context = await make_request(query)  # Assuming make_request is defined elsewhere to get the context
+
+        result_responses, result_scores = await resume_eval(afe_resume_analysis_system_message, afe_resume_analysis_user_prompt, dimension)
         
         # Assuming result_responses is a string or dict containing the relevant message
         all_responses[dimension] = result_responses
