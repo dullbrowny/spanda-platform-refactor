@@ -1037,7 +1037,7 @@ async def instructor_eval(instructor_name, context, score_criterion, explanation
 
     # Initialize empty dictionaries to store relevant responses and scores
     responses = {}
-    scores_dict = {}
+    score = 0
 
     # Evaluation prompt template
     evaluate_instructions = f"""
@@ -1107,12 +1107,12 @@ async def instructor_eval(instructor_name, context, score_criterion, explanation
     if match:
         # Check which group matched and extract the score
         score_value = match.group(2).strip() if match.group(2) else match.group(3).strip()
-        scores_dict[score_criterion] = score_value
+        score = score_value
     else:
-        scores_dict[score_criterion] = "N/A"
+        score = -1
 
     # Return only the relevant content without any metadata
-    return {"content": content}, scores_dict
+    return {"content": content}, score
 
 
 # we dont need this
@@ -1645,7 +1645,10 @@ async def process_user_submissions(user, submissions_by_user, activity_type, rub
                             for i, qa_pair in enumerate(qa_pairs):
                                  
                                 try:
+                                    print(qa_pair)
                                     question_req, answer_req = split_qa_pair(qa_pair)
+                                    print(question_req)
+                                    print(answer_req)
                                     query_request_rubric= QueryRequestWithGroundTruth(question=question_req,answer=answer_req,rubric=rubric_payload,ground_truth=ground_truth_payload)
                                     
                                     query_request = QueryRequest(query=qa_pair)
@@ -2343,6 +2346,7 @@ async def ollama_aqg(request: QueryRequestaqg):
         f"""Please generate {n} variants of the question: '{query}'.
 
             In multi-part problems, maintain the original structure while ensuring each variant part is thoughtfully designed and distinct. Type 'Spanda' before the beggining of every variant. Make sure to add 'Spanda' before every variant, its important.
+            Please change the numbers wherever possible.
         """
     )
     # Generate the response using the utility function
@@ -2520,6 +2524,7 @@ async def generate_response(request: QueryRequest,
 async def spanda_chat(request: QueryRequest):
     # Extract context
     context = await make_request(request.query)
+    print(context)
     if context is None:
         raise HTTPException(status_code=500, detail="Failed to fetch context")
     # user_context = " ".join(context)
@@ -2994,7 +2999,8 @@ async def evaluate_Transcipt(request: QueryRequest):
 
     instructor_name = request.query
     all_responses = {}
-    all_scores = {}
+    sub_scores_dict = {}
+    master_scores_dict = {}
 
     # for dimension, explanation in dimensions.items():
     #     query = f"Judge document name {instructor_name} based on {dimension}."
@@ -3010,30 +3016,39 @@ async def evaluate_Transcipt(request: QueryRequest):
     #     all_responses[dimension] = result_responses.get('content', "No response available")
     #     all_scores[dimension] = result_scores.get(dimension, "No score available")
 
-
+    # iterates through master-trait and gets sub-trait dict.
     for dimension, sub_traits_and_explanations in dimensions.items():
-
+        # Iterating through each sub-trait and retrieving context
+        count_of_subtrait = 0
+        sum_of_all_sub_trait_scores = 0
         for sub_trait, explanation_of_subtrait in sub_traits_and_explanations.items():
             query = f"Judge document name {instructor_name} based on {sub_trait}."
+            # retrieving context
             context = await make_request(query)  # Assuming make_request is defined elsewhere
-            
-        result_responses, result_scores = await instructor_eval(instructor_name, context, sub_trait, explanation_of_subtrait)
+            # retrieving feedback and computing score for the sub-dimension
+            result_response, result_score = await instructor_eval(instructor_name, context, sub_trait, explanation_of_subtrait)
+            sum_of_all_sub_trait_scores += int(result_score)
+            count_of_subtrait += 1
 
-        # Log the raw outputs for debugging
-        print(f"Dimension: {dimension}")
-        print(f"Raw Result Responses: {result_responses}")
-        print(f"Raw Result Scores: {result_scores}")
+        master_scores_dict[dimension] = sum_of_all_sub_trait_scores/count_of_subtrait
+
+
+            
+        # # Log the raw outputs for debugging
+        # print(f"Dimension: {dimension}")
+        # print(f"Raw Result Responses: {result_responses}")
+        # print(f"Raw Result Scores: {result_scores}")
 
         # Safely access and store the responses and scores
-        all_responses[dimension] = result_responses.get('content', "No response available")
-        all_scores[dimension] = result_scores.get(dimension, "No score available")
-
-    print("Final Responses:", all_responses)
-    print("Final Scores:", all_scores)
+        all_responses[dimension] = result_response.get('content', "No response available")
+        # all_score[dimension] = result_score.get(dimension, "No score available")
+    
+    # print("Final Responses:", all_responses)
+    # print("Final Scores:", all_scores)
     
     response = {
         "DOCUMENT": all_responses,
-        "SCORES": all_scores
+        "SCORES": master_scores_dict
     }
 
     return response
