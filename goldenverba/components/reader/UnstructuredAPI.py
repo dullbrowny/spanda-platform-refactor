@@ -24,13 +24,17 @@ class UnstructuredReader(Reader):
         self.description = "Uses the Unstructured API to import multiple file types such as plain text and documents (.pdf, .csv). Requires an Unstructured API Key"
 
     def load(
-        self, fileData: list[FileData], textValues: list[str], logging: list[dict]
+        self,
+        fileData: list[FileData],
+        textValues: list[str],
+        logging: list[dict],
     ) -> tuple[list[Document], list[str]]:
 
         documents = []
 
         url = os.environ.get(
-            "UNSTRUCTURED_API_URL", "https://api.unstructured.io/general/v0/general"
+            "UNSTRUCTURED_API_URL",
+            "https://api.unstructured.io/general/v0/general",
         )
         api_key = os.environ.get("UNSTRUCTURED_API_KEY", "")
 
@@ -52,7 +56,9 @@ class UnstructuredReader(Reader):
 
         for file in fileData:
             msg.info(f"Loading in {file.filename}")
-            logging.append({"type": "INFO", "message": f"Importing {file.filename}"})
+            logging.append(
+                {"type": "INFO", "message": f"Importing {file.filename}"}
+            )
 
             file_bytes = io.BytesIO(base64.b64decode(file.content))
             file_data = {"files": (file.filename, file_bytes)}
@@ -62,7 +68,7 @@ class UnstructuredReader(Reader):
                     url, headers=headers, data=data, files=file_data
                 )
                 json_response = response.json()
-                
+
                 if "detail" in json_response:
                     msg.warn(
                         f"Failed to load {file.filename} : {json_response['detail']}"
@@ -95,7 +101,9 @@ class UnstructuredReader(Reader):
                     name=file.filename,
                     text=full_content,
                     type=self.config["document_type"].text,
-                    timestamp=str(datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+                    timestamp=str(
+                        datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    ),
                     reader=self.name,
                 )
                 documents.append(document)

@@ -23,7 +23,9 @@ class TokenChunker(Chunker):
         self.description = "Chunks documents by word tokens. Choose between the chunk size and their overlap."
         self.encoding = tiktoken.encoding_for_model("gpt-3.5-turbo")
 
-    def chunk(self, documents: list[Document], logging: list[dict]) -> list[Document]:
+    def chunk(
+        self, documents: list[Document], logging: list[dict]
+    ) -> list[Document]:
 
         for document in tqdm(
             documents, total=len(documents), desc="Chunking documents"
@@ -32,7 +34,9 @@ class TokenChunker(Chunker):
             if len(document.chunks) > 0:
                 continue
 
-            encoded_tokens = self.encoding.encode(document.text, disallowed_special=())
+            encoded_tokens = self.encoding.encode(
+                document.text, disallowed_special=()
+            )
 
             if (
                 self.config["units"].value > len(encoded_tokens)
@@ -62,7 +66,9 @@ class TokenChunker(Chunker):
             while i < len(encoded_tokens):
                 # Overlap
                 start_i = i
-                end_i = min(i + self.config["units"].value, len(encoded_tokens))
+                end_i = min(
+                    i + self.config["units"].value, len(encoded_tokens)
+                )
 
                 chunk_tokens = encoded_tokens[start_i:end_i]
                 chunk_text = self.encoding.decode(chunk_tokens)

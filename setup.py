@@ -59,6 +59,6 @@ setup(
         ],
         "google": [
             "vertexai==1.46.0",
-        ]
+        ],
     },
 )

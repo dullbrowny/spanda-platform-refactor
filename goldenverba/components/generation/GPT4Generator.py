@@ -78,13 +78,19 @@ class GPT4Generator(Generator):
                     if len(chunk["choices"]) > 0:
                         if "content" in chunk["choices"][0]["delta"]:
                             yield {
-                                "message": chunk["choices"][0]["delta"]["content"],
-                                "finish_reason": chunk["choices"][0]["finish_reason"],
+                                "message": chunk["choices"][0]["delta"][
+                                    "content"
+                                ],
+                                "finish_reason": chunk["choices"][0][
+                                    "finish_reason"
+                                ],
                             }
                         else:
                             yield {
                                 "message": "",
-                                "finish_reason": chunk["choices"][0]["finish_reason"],
+                                "finish_reason": chunk["choices"][0][
+                                    "finish_reason"
+                                ],
                             }
             except StopAsyncIteration:
                 pass
@@ -93,7 +99,10 @@ class GPT4Generator(Generator):
             raise
 
     def prepare_messages(
-        self, queries: list[str], context: list[str], conversation: dict[str, str]
+        self,
+        queries: list[str],
+        context: list[str],
+        conversation: dict[str, str],
     ) -> dict[str, str]:
         """
         Prepares a list of messages formatted for a Retrieval Augmented Generation chatbot system, including system instructions, previous conversation, and a new user query with context.

@@ -27,14 +27,19 @@ class BasicReader(Reader):
         self.requires_library = ["pypdf"]
 
     def load(
-        self, fileData: list[FileData], textValues: list[str], logging: list[dict]
+        self,
+        fileData: list[FileData],
+        textValues: list[str],
+        logging: list[dict],
     ) -> tuple[list[Document], list[str]]:
 
         documents = []
 
         for file in fileData:
             msg.info(f"Loading in {file.filename}")
-            logging.append({"type": "INFO", "message": f"Importing {file.filename}"})
+            logging.append(
+                {"type": "INFO", "message": f"Importing {file.filename}"}
+            )
 
             decoded_bytes = base64.b64decode(file.content)
 
@@ -45,7 +50,9 @@ class BasicReader(Reader):
                         name=file.filename,
                         text=original_text,
                         type=self.config["document_type"].text,
-                        timestamp=str(datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+                        timestamp=str(
+                            datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        ),
                         reader=self.name,
                     )
                     documents.append(document)
@@ -90,7 +97,9 @@ class BasicReader(Reader):
                         name=file.filename,
                         text=full_text,
                         type=self.config["document_type"].text,
-                        timestamp=str(datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+                        timestamp=str(
+                            datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        ),
                         reader=self.name,
                     )
                     documents.append(document)

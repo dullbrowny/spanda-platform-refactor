@@ -19,14 +19,14 @@ def get_config(manager: VerbaManager) -> dict:
     config = {}
 
     exists = manager.client.data_object.exists(
-    config_uuid,
-    class_name="VERBA_Config",
+        config_uuid,
+        class_name="VERBA_Config",
     )
 
     if exists:
         document = manager.client.data_object.get_by_id(
-                config_uuid,
-                class_name="VERBA_Config",
+            config_uuid,
+            class_name="VERBA_Config",
         )
         config = json.loads(document["properties"]["config"])
 
@@ -107,7 +107,9 @@ def set_config(manager: VerbaManager, combined_config: dict):
     save_config(manager, combined_config)
     config = combined_config.get("RAG", {})
 
-    selected_theme = combined_config.get("SETTING", {}).get("selectedTheme", "")
+    selected_theme = combined_config.get("SETTING", {}).get(
+        "selectedTheme", ""
+    )
     enable_caching = (
         combined_config.get("SETTING", {})
         .get("themes", {})
@@ -118,12 +120,18 @@ def set_config(manager: VerbaManager, combined_config: dict):
         .get("checked", True)
     )
     if manager.enable_caching != enable_caching:
-        msg.info(f"Changing Caching from {manager.enable_caching} to {enable_caching} ")
+        msg.info(
+            f"Changing Caching from {manager.enable_caching} to {enable_caching} "
+        )
         manager.enable_caching = enable_caching
 
     # Set Selected
-    manager.reader_manager.set_reader(config.get("Reader", {}).get("selected", ""))
-    manager.chunker_manager.set_chunker(config.get("Chunker", {}).get("selected", ""))
+    manager.reader_manager.set_reader(
+        config.get("Reader", {}).get("selected", "")
+    )
+    manager.chunker_manager.set_chunker(
+        config.get("Chunker", {}).get("selected", "")
+    )
     manager.embedder_manager.set_embedder(
         config.get("Embedder", {}).get("selected", "")
     )
@@ -190,34 +198,38 @@ def save_config(manager: VerbaManager, config: dict):
     """Save config to file."""
 
     exists = manager.client.data_object.exists(
-    config_uuid,
-    class_name="VERBA_Config",
+        config_uuid,
+        class_name="VERBA_Config",
     )
 
     if exists:
-        manager.client.data_object.delete(uuid=config_uuid, class_name="VERBA_Config")
+        manager.client.data_object.delete(
+            uuid=config_uuid, class_name="VERBA_Config"
+        )
 
     with manager.client.batch as batch:
         batch.batch_size = 1
         properties = {
             "config": json.dumps(config),
         }
-        manager.client.batch.add_data_object(properties, "VERBA_Config", uuid=config_uuid)
+        manager.client.batch.add_data_object(
+            properties, "VERBA_Config", uuid=config_uuid
+        )
         msg.good("Config Saved in Weaviate")
 
 
 def load_config(manager):
     """Save config to file."""
-    
+
     exists = manager.client.data_object.exists(
-    config_uuid,
-    class_name="VERBA_Config",
+        config_uuid,
+        class_name="VERBA_Config",
     )
 
     if exists:
         document = manager.client.data_object.get_by_id(
-                config_uuid,
-                class_name="VERBA_Config",
+            config_uuid,
+            class_name="VERBA_Config",
         )
 
         config = json.loads(document["properties"]["config"])

@@ -2,15 +2,16 @@ import ollama
 import httpx
 import asyncio
 
+
 async def make_request(query):
-    async with httpx.AsyncClient(timeout=None) as client:  # Set timeout to None to wait indefinitely
+    async with httpx.AsyncClient(
+        timeout=None
+    ) as client:  # Set timeout to None to wait indefinitely
         # Define the endpoint URL
         query_url = "http://localhost:8000/api/query"
 
         # Define the payload
-        payload = {
-            "query": query
-        }
+        payload = {"query": query}
 
         try:
             # Make a POST request to the /api/query endpoint
@@ -20,11 +21,16 @@ async def make_request(query):
                 print("Successfully retrieved context!")
                 return response_data.get("context", "No context provided")
             else:
-                print(f"Query Request failed with status code {response_query.status_code}")
+                print(
+                    f"Query Request failed with status code {response_query.status_code}"
+                )
                 return None
         except httpx.RequestError as exc:
-            print(f"An error occurred while requesting {exc.request.url!r}: {exc}")
+            print(
+                f"An error occurred while requesting {exc.request.url!r}: {exc}"
+            )
             return None
+
 
 async def generate_question_variants(base_question, n, context):
     # Join the context into a single string
@@ -69,29 +75,32 @@ async def generate_question_variants(base_question, n, context):
     # Define the payload for Ollama
     payload = {
         "messages": [
-            {
-                "role": "system",
-                "content": base_question_gen
-            },
+            {"role": "system", "content": base_question_gen},
             {
                 "role": "user",
                 "content": f"Please generate {n} variants of the question: '{base_question}'",
-            }
+            },
         ],
         "stream": False,
         "options": {
-            "top_k": 1, 
-            "top_p": 0, 
-            "temperature": 0, 
-            "seed": 100, 
-        }
+            "top_k": 1,
+            "top_p": 0,
+            "temperature": 0,
+            "seed": 100,
+        },
     }
 
     # Asynchronous call to Ollama API
-    response = await asyncio.to_thread(ollama.chat, model='llama3', messages=payload['messages'], stream=payload['stream'])
+    response = await asyncio.to_thread(
+        ollama.chat,
+        model="llama3",
+        messages=payload["messages"],
+        stream=payload["stream"],
+    )
 
     # Return the response content
-    return response['message']['content']
+    return response["message"]["content"]
+
 
 # # Example usage
 # async def main():

@@ -51,7 +51,9 @@ class OllamaGeneratorAGA(Generator):
                             json_data = json.loads(
                                 line.decode("utf-8")
                             )  # Decode bytes to string then to JSON
-                            message = json_data.get("message", {}).get("content", "")
+                            message = json_data.get("message", {}).get(
+                                "content", ""
+                            )
                             finish_reason = (
                                 "stop" if json_data.get("done", False) else ""
                             )
@@ -70,7 +72,10 @@ class OllamaGeneratorAGA(Generator):
             raise
 
     def prepare_messages(
-        self, queries: list[str], context: list[str], conversation: dict[str, str]
+        self,
+        queries: list[str],
+        context: list[str],
+        conversation: dict[str, str],
     ) -> dict[str, str]:
         """
         Prepares a list of messages formatted for a Retrieval Augmented Generation chatbot system, including system instructions, previous conversation, and a new user query with context.
@@ -182,7 +187,6 @@ class OllamaGeneratorAGA(Generator):
 
         for message in conversation:
             messages.append({"role": message.type, "content": message.content})
-
 
         user_context = " ".join(context)
         query = " ".join(queries)

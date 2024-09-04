@@ -38,7 +38,9 @@ import time
 try:
     import tiktoken
 except Exception:
-    msg.warn("tiktoken not installed, your base installation might be corrupted.")
+    msg.warn(
+        "tiktoken not installed, your base installation might be corrupted."
+    )
 
 
 class ReaderManager:
@@ -51,7 +53,10 @@ class ReaderManager:
         self.selected_reader: str = "BasicReader"
 
     def load(
-        self, fileData: list[FileData], textValues: list[str], logging: list[dict]
+        self,
+        fileData: list[FileData],
+        textValues: list[str],
+        logging: list[dict],
     ) -> tuple[list[Document], list[str]]:
 
         start_time = time.time()  # Start timing
@@ -75,7 +80,9 @@ class ReaderManager:
             fileData, textValues, logging
         )
 
-        elapsed_time = round(time.time() - start_time, 2)  # Calculate elapsed time
+        elapsed_time = round(
+            time.time() - start_time, 2
+        )  # Calculate elapsed time
 
         msg.good(f"Loaded {len(documents)} documents in {elapsed_time}s")
         logging.append(
@@ -105,7 +112,9 @@ class ChunkerManager:
         }
         self.selected_chunker: str = "TokenChunker"
 
-    def chunk(self, documents: list[Document], logging: list[dict]) -> list[Document]:
+    def chunk(
+        self, documents: list[Document], logging: list[dict]
+    ) -> list[Document]:
         logging.append(
             {
                 "type": "INFO",
@@ -117,7 +126,9 @@ class ChunkerManager:
             documents, logging
         )
         if self.check_chunks(chunked_docs):
-            elapsed_time = round(time.time() - start_time, 2)  # Calculate elapsed time
+            elapsed_time = round(
+                time.time() - start_time, 2
+            )  # Calculate elapsed time
             msg.good(
                 f"Chunking completed with {sum([len(document.chunks) for document in chunked_docs])} chunks in {elapsed_time}s"
             )
@@ -196,7 +207,9 @@ class EmbeddingManager:
         successful_embedding = self.embedders[self.selected_embedder].embed(
             documents, client, logging
         )
-        elapsed_time = round(time.time() - start_time, 2)  # Calculate elapsed time
+        elapsed_time = round(
+            time.time() - start_time, 2
+        )  # Calculate elapsed time
         msg.good(
             f"Embedding completed with {len(documents)} Documents and {sum([len(document.chunks) for document in documents])} chunks in {elapsed_time}s"
         )
@@ -287,12 +300,17 @@ class GeneratorManager:
         """
         if conversation is None:
             conversation = {}
-        async for result in self.generators[self.selected_generator].generate_stream(
+        async for result in self.generators[
+            self.selected_generator
+        ].generate_stream(
             queries,
             context,
             self.truncate_conversation_dicts(
                 conversation,
-                int(self.generators[self.selected_generator].context_window * 0.375),
+                int(
+                    self.generators[self.selected_generator].context_window
+                    * 0.375
+                ),
             ),
         ):
             yield result
@@ -315,13 +333,17 @@ class GeneratorManager:
 
         # Start with the newest conversations
         for item_dict in reversed(conversation_dicts):
-            item_tokens = encoding.encode(item_dict["content"], disallowed_special=())
+            item_tokens = encoding.encode(
+                item_dict["content"], disallowed_special=()
+            )
 
             # If adding the entire new item exceeds the max tokens
             if accumulated_tokens + len(item_tokens) > max_tokens:
                 # Calculate how many tokens we can add from this item
                 remaining_space = max_tokens - accumulated_tokens
-                truncated_content = encoding.decode(item_tokens[:remaining_space])
+                truncated_content = encoding.decode(
+                    item_tokens[:remaining_space]
+                )
 
                 # Create a new truncated item dictionary
                 truncated_item_dict = {

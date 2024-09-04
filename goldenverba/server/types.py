@@ -2,6 +2,7 @@ from pydantic import BaseModel
 from goldenverba.components.types import FileData
 from typing import List, Optional
 
+
 class QueryPayload(BaseModel):
     query: str
     course_id: str = None
@@ -50,11 +51,10 @@ class ImportPayload(BaseModel):
     textValues: list[str]
     config: dict
 
+
 class QueryRequest(BaseModel):
     query: str
     course_id: str = None
-
-
 
 
 class QueryRequestWithGroundTruth(BaseModel):
@@ -130,10 +130,12 @@ class QueryRequestResume(BaseModel):
     jd: str
     course_id: str = None
 
+
 class QueryRequestaqg(BaseModel):
     query: str
     NumberOfVariants: int
     course_id: str = None
+
 
 class ConfigPayload(BaseModel):
     config: dict
@@ -147,12 +149,15 @@ class SetComponentPayload(BaseModel):
     component: str
     selected_component: str
 
+
 class MoodleRequest(BaseModel):
     course_name: str
     assignment_name: str
 
+
 class CourseIDRequest(BaseModel):
     course_shortname: str
+
 
 class AuthDetails(BaseModel):
     username: str
@@ -163,16 +168,19 @@ class Token(BaseModel):
     access_token: str
     token_type: str
 
+
 class TokenData(BaseModel):
     username: str
+
 
 class Course(BaseModel):
     id: int
     fullname: str  # Updated field name to match the data
 
+
 class RequestAGA(BaseModel):
-    course_shortname : str
-    assignment_name : str
+    course_shortname: str
+    assignment_name: str
     ground_truth: str = ""
     rubric: str
 

@@ -31,13 +31,15 @@ class MiniLMEmbedder(Embedder):
             self.device = accelerator.device
 
             self.model = AutoModel.from_pretrained(
-                "sentence-transformers/all-MiniLM-L6-v2", device_map=self.device
+                "sentence-transformers/all-MiniLM-L6-v2",
+                device_map=self.device,
             )
 
             self.model = accelerator.prepare(self.model)
 
             self.tokenizer = AutoTokenizer.from_pretrained(
-                "sentence-transformers/all-MiniLM-L6-v2", device_map=self.device
+                "sentence-transformers/all-MiniLM-L6-v2",
+                device_map=self.device,
             )
 
         except Exception as e:
@@ -58,8 +60,14 @@ class MiniLMEmbedder(Embedder):
         for document in tqdm(
             documents, total=len(documents), desc="Vectorizing document chunks"
         ):
-            for chunk in tqdm(document.chunks, total=len(document.chunks), desc="Vectorizing Chunks"):
-                chunk.set_vector(self.vectorize_chunk(document.name + " : " + chunk.text))
+            for chunk in tqdm(
+                document.chunks,
+                total=len(document.chunks),
+                desc="Vectorizing Chunks",
+            ):
+                chunk.set_vector(
+                    self.vectorize_chunk(document.name + " : " + chunk.text)
+                )
 
         return self.import_data(documents, client, logging)
 

@@ -3,6 +3,7 @@ import json
 import aiohttp
 from goldenverba.components.interfaces import Generator
 
+
 class OllamaGenerator(Generator):
     def __init__(self):
         super().__init__()
@@ -52,16 +53,24 @@ class OllamaGenerator(Generator):
 
         if conversation is None:
             conversation = {}
-        messages = self.prepare_messages(queries, context, conversation, system_prompt, user_prompt)
+        messages = self.prepare_messages(
+            queries, context, conversation, system_prompt, user_prompt
+        )
         try:
             data = {"model": model, "messages": messages}
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, json=data) as response:
                     async for line in response.content:
                         if line.strip():  # Ensure line is not just whitespace
-                            json_data = json.loads(line.decode("utf-8"))  # Decode bytes to string then to JSON
-                            message = json_data.get("message", {}).get("content", "")
-                            finish_reason = "stop" if json_data.get("done", False) else ""
+                            json_data = json.loads(
+                                line.decode("utf-8")
+                            )  # Decode bytes to string then to JSON
+                            message = json_data.get("message", {}).get(
+                                "content", ""
+                            )
+                            finish_reason = (
+                                "stop" if json_data.get("done", False) else ""
+                            )
 
                             yield {
                                 "message": message,
@@ -77,7 +86,12 @@ class OllamaGenerator(Generator):
             raise
 
     def prepare_messages(
-        self, queries: list[str], context: list[str], conversation: dict[str, str], system_prompt: str, user_prompt: str
+        self,
+        queries: list[str],
+        context: list[str],
+        conversation: dict[str, str],
+        system_prompt: str,
+        user_prompt: str,
     ) -> dict[str, str]:
         """
         Prepares a list of messages formatted for a Retrieval Augmented Generation chatbot system, including system instructions, previous conversation, and a new user query with context.
@@ -108,7 +122,11 @@ class OllamaGenerator(Generator):
         messages.append(
             {
                 "role": "user",
-                "content": user_prompt if user_prompt else f"With this provided context: '{user_context}' Please answer this query: '{query}'",
+                "content": (
+                    user_prompt
+                    if user_prompt
+                    else f"With this provided context: '{user_context}' Please answer this query: '{query}'"
+                ),
             }
         )
 

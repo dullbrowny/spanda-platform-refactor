@@ -30,6 +30,7 @@ from goldenverba.components.managers import (
 
 load_dotenv()
 
+
 class VerbaManager:
     """Manages all Verba Components."""
 
@@ -56,7 +57,10 @@ class VerbaManager:
             schema_manager.init_schemas(self.client, embedding, False, True)
 
     def import_data(
-        self, fileData: list[FileData], textValues: list[str], logging: list[dict]
+        self,
+        fileData: list[FileData],
+        textValues: list[str],
+        logging: list[dict],
     ) -> list[Document]:
 
         loaded_documents, logging = self.reader_manager.load(
@@ -71,7 +75,10 @@ class VerbaManager:
                 filtered_documents.append(document)
             else:
                 logging.append(
-                    {"type": "WARNING", "message": f"{document.name} already exists."}
+                    {
+                        "type": "WARNING",
+                        "message": f"{document.name} already exists.",
+                    }
                 )
 
         modified_documents, logging = self.chunker_manager.chunk(
@@ -188,11 +195,15 @@ class VerbaManager:
         # Use Weaviate Embedded
         else:
             try:
-                _create_unverified_https_context = ssl._create_unverified_context
+                _create_unverified_https_context = (
+                    ssl._create_unverified_context
+                )
             except AttributeError:
                 pass
             else:
-                ssl._create_default_https_context = _create_unverified_https_context
+                ssl._create_default_https_context = (
+                    _create_unverified_https_context
+                )
 
             if google_project != "":
                 additional_env_vars = {
@@ -363,7 +374,9 @@ class VerbaManager:
         if os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "") != "":
             self.environment_variables["GOOGLE_APPLICATION_CREDENTIALS"] = True
         else:
-            self.environment_variables["GOOGLE_APPLICATION_CREDENTIALS"] = False
+            self.environment_variables["GOOGLE_APPLICATION_CREDENTIALS"] = (
+                False
+            )
 
         # Azure openai ressource name, mandatory when using Azure, should be XXX when endpoint is https://XXX.openai.azure.com
         if os.environ.get("AZURE_OPENAI_RESOURCE_NAME", "") != "":
@@ -405,7 +418,9 @@ class VerbaManager:
         try:
             for _class in schema_info["classes"]:
                 results = (
-                    self.client.query.aggregate(_class["class"]).with_meta_count().do()
+                    self.client.query.aggregate(_class["class"])
+                    .with_meta_count()
+                    .do()
                 )
                 if "VERBA" in _class["class"]:
                     schemas[_class["class"]] = (
@@ -416,7 +431,9 @@ class VerbaManager:
                         .get("count", 0)
                     )
         except Exception as e:
-            msg.error(f"Couldn't retrieve information about Collections, if you're using Weaviate Embedded, try to reset `~/.local/share/weaviate` ({str(e)})")
+            msg.error(
+                f"Couldn't retrieve information about Collections, if you're using Weaviate Embedded, try to reset `~/.local/share/weaviate` ({str(e)})"
+            )
 
         return schemas
 
@@ -477,7 +494,9 @@ class VerbaManager:
         ):
             if (
                 query
-                == check_results["data"]["Get"]["VERBA_Suggestion"][0]["suggestion"]
+                == check_results["data"]["Get"]["VERBA_Suggestion"][0][
+                    "suggestion"
+                ]
             ):
                 return
 
@@ -490,33 +509,43 @@ class VerbaManager:
 
         msg.info("Added query to suggestions")
 
-    def retrieve_chunks(self, queries: list[str], course_id: str = None) -> tuple[list[Chunk], str]:
+    def retrieve_chunks(
+        self, queries: list[str], course_id: str = None
+    ) -> tuple[list[Chunk], str]:
         # print(f"Initial course_id: {course_id}")
         chunks, context = self.retriever_manager.retrieve(
             queries,
             self.client,
-            self.embedder_manager.embedders[self.embedder_manager.selected_embedder],
+            self.embedder_manager.embedders[
+                self.embedder_manager.selected_embedder
+            ],
             self.generator_manager.generators[
                 self.generator_manager.selected_generator
             ],
         )
-        
+
         if course_id:
             course_id = course_id.strip().lower()
             # print(f"Filtering chunks with course_id: {course_id}")
-            
+
             # Debug print each chunk's doc_name
             # for chunk in chunks:
-                # print(f"Chunk doc_name: {chunk.doc_name.lower()}")
-                
-            chunks = [chunk for chunk in chunks if chunk.doc_name.lower().startswith(course_id)]
+            # print(f"Chunk doc_name: {chunk.doc_name.lower()}")
+
+            chunks = [
+                chunk
+                for chunk in chunks
+                if chunk.doc_name.lower().startswith(course_id)
+            ]
 
         # Debug print to verify filtered chunks
         print(f"Filtered chunks: {chunks}")
 
         return chunks, context
 
-    def retrieve_all_documents(self, doc_type: str, page: int, pageSize: int) -> list:
+    def retrieve_all_documents(
+        self, doc_type: str, page: int, pageSize: int
+    ) -> list:
         """Return all documents from Weaviate
         @returns list - Document list.
         """
@@ -708,22 +737,23 @@ class VerbaManager:
     def reset_documents(self):
         # Check if all schemas exist for all possible vectorizers
         for vectorizer in schema_manager.VECTORIZERS:
-            document_class_name = "VERBA_Document_" + schema_manager.strip_non_letters(
-                vectorizer
+            document_class_name = (
+                "VERBA_Document_"
+                + schema_manager.strip_non_letters(vectorizer)
             )
-            chunk_class_name = "VERBA_Chunk_" + schema_manager.strip_non_letters(
-                vectorizer
+            chunk_class_name = (
+                "VERBA_Chunk_" + schema_manager.strip_non_letters(vectorizer)
             )
             self.client.schema.delete_class(document_class_name)
             self.client.schema.delete_class(chunk_class_name)
             schema_manager.init_schemas(self.client, vectorizer, False, True)
 
         for embedding in schema_manager.EMBEDDINGS:
-            document_class_name = "VERBA_Document_" + schema_manager.strip_non_letters(
-                embedding
+            document_class_name = (
+                "VERBA_Document_" + schema_manager.strip_non_letters(embedding)
             )
-            chunk_class_name = "VERBA_Chunk_" + schema_manager.strip_non_letters(
-                embedding
+            chunk_class_name = (
+                "VERBA_Chunk_" + schema_manager.strip_non_letters(embedding)
             )
             self.client.schema.delete_class(document_class_name)
             self.client.schema.delete_class(chunk_class_name)
@@ -732,12 +762,16 @@ class VerbaManager:
     def reset_cache(self):
         # Check if all schemas exist for all possible vectorizers
         for vectorizer in schema_manager.VECTORIZERS:
-            class_name = "VERBA_Cache_" + schema_manager.strip_non_letters(vectorizer)
+            class_name = "VERBA_Cache_" + schema_manager.strip_non_letters(
+                vectorizer
+            )
             self.client.schema.delete_class(class_name)
             schema_manager.init_schemas(self.client, vectorizer, False, True)
 
         for embedding in schema_manager.EMBEDDINGS:
-            class_name = "VERBA_Cache_" + schema_manager.strip_non_letters(embedding)
+            class_name = "VERBA_Cache_" + schema_manager.strip_non_letters(
+                embedding
+            )
             self.client.schema.delete_class(class_name)
             schema_manager.init_schemas(self.client, embedding, False, True)
 
@@ -784,7 +818,9 @@ class VerbaManager:
         else:
             return False
 
-    def check_verba_component(self, component: VerbaComponent) -> tuple[bool, str]:
+    def check_verba_component(
+        self, component: VerbaComponent
+    ) -> tuple[bool, str]:
         return component.check_available(
             self.environment_variables, self.installed_libraries
         )

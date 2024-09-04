@@ -96,12 +96,18 @@ class WindowRetriever(Retriever):
 
         for chunk in chunks:
             if chunk.doc_name not in doc_name_map:
-                doc_name_map[chunk.doc_name] = {"score": 0, "chunks":{}}
+                doc_name_map[chunk.doc_name] = {"score": 0, "chunks": {}}
 
             doc_name_map[chunk.doc_name]["chunks"][chunk.chunk_id] = chunk
             doc_name_map[chunk.doc_name]["score"] += float(chunk.score)
 
-        doc_name_map = dict(sorted(doc_name_map.items(), key=lambda item: item[1]['score'], reverse=True))
+        doc_name_map = dict(
+            sorted(
+                doc_name_map.items(),
+                key=lambda item: item[1]["score"],
+                reverse=True,
+            )
+        )
 
         for doc in doc_name_map:
             chunk_map = doc_name_map[doc]["chunks"]
@@ -109,7 +115,9 @@ class WindowRetriever(Retriever):
             added_chunks = {}
             for chunk in chunk_map:
                 chunk_id = int(chunk)
-                all_chunk_range = list(range(chunk_id - window, chunk_id + window + 1))
+                all_chunk_range = list(
+                    range(chunk_id - window, chunk_id + window + 1)
+                )
                 for _range in all_chunk_range:
                     if (
                         _range >= 0
@@ -139,7 +147,9 @@ class WindowRetriever(Retriever):
                                         {
                                             "path": ["doc_name"],
                                             "operator": "Equal",
-                                            "valueText": chunk_map[chunk].doc_name,
+                                            "valueText": chunk_map[
+                                                chunk
+                                            ].doc_name,
                                         },
                                     ],
                                 }
@@ -178,12 +188,20 @@ class WindowRetriever(Retriever):
         for doc in doc_name_map:
             sorted_dict = {
                 k: doc_name_map[doc]["chunks"][k]
-                for k in sorted(doc_name_map[doc]["chunks"], key=lambda x: int(x))
+                for k in sorted(
+                    doc_name_map[doc]["chunks"], key=lambda x: int(x)
+                )
             }
 
             context += "--- Document " + doc + " ---" + "\n\n"
 
             for chunk in sorted_dict:
-                context += "Chunk "+ str(sorted_dict[chunk].chunk_id) + "\n\n" + sorted_dict[chunk].text + "\n\n"
+                context += (
+                    "Chunk "
+                    + str(sorted_dict[chunk].chunk_id)
+                    + "\n\n"
+                    + sorted_dict[chunk].text
+                    + "\n\n"
+                )
 
         return context

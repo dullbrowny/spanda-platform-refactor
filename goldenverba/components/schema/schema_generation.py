@@ -34,9 +34,12 @@ def verify_vectorizer(
         skip_properties = []
     modified_schema = schema.copy()
 
-    #adding specific config for Azure OpenAI
+    # adding specific config for Azure OpenAI
     vectorizer_config = {}
-    if os.getenv("OPENAI_API_TYPE") == "azure" and vectorizer=="text2vec-openai":
+    if (
+        os.getenv("OPENAI_API_TYPE") == "azure"
+        and vectorizer == "text2vec-openai"
+    ):
         resourceName = os.getenv("AZURE_OPENAI_RESOURCE_NAME")
         model = os.getenv("AZURE_OPENAI_EMBEDDING_MODEL")
         if resourceName is None or model is None:
@@ -44,7 +47,10 @@ def verify_vectorizer(
                 "AZURE_OPENAI_RESOURCE_NAME and AZURE_OPENAI_EMBEDDING_MODEL should be set when OPENAI_API_TYPE is azure. Resource name is XXX in http://XXX.openai.azure.com"
             )
         vectorizer_config = {
-            "text2vec-openai": {"deploymentId": model, "resourceName": resourceName}
+            "text2vec-openai": {
+                "deploymentId": model,
+                "resourceName": resourceName,
+            }
         }
 
     base_url = os.getenv("OPENAI_BASE_URL", "")
@@ -147,7 +153,10 @@ def init_schemas(
 
 
 def init_documents(
-    client: Client, vectorizer: str = None, force: bool = False, check: bool = False
+    client: Client,
+    vectorizer: str = None,
+    force: bool = False,
+    check: bool = False,
 ) -> tuple[dict, dict]:
     """Initializes the Document and Chunk class
     @parameter client : Client - Weaviate client
@@ -275,7 +284,10 @@ def init_documents(
 
 
 def init_cache(
-    client: Client, vectorizer: str = None, force: bool = False, check: bool = False
+    client: Client,
+    vectorizer: str = None,
+    force: bool = False,
+    check: bool = False,
 ) -> dict:
     """Initializes the Cache
     @parameter client : Client - Weaviate client
@@ -339,7 +351,10 @@ def init_cache(
 
 
 def init_suggestion(
-    client: Client, vectorizer: str = None, force: bool = False, check: bool = False
+    client: Client,
+    vectorizer: str = None,
+    force: bool = False,
+    check: bool = False,
 ) -> dict:
     """Initializes the Suggestion schema
     @parameter client : Client - Weaviate client
@@ -381,15 +396,21 @@ def init_suggestion(
             client.schema.create(suggestion_schema)
             msg.good(f"{suggestion_name} schema created")
         else:
-            msg.warn(f"Skipped deleting {suggestion_name} schema, nothing changed")
+            msg.warn(
+                f"Skipped deleting {suggestion_name} schema, nothing changed"
+            )
     else:
         client.schema.create(suggestion_schema)
         msg.good(f"{suggestion_name} schema created")
 
     return suggestion_schema
 
+
 def init_config(
-    client: Client, vectorizer: str = None, force: bool = False, check: bool = False
+    client: Client,
+    vectorizer: str = None,
+    force: bool = False,
+    check: bool = False,
 ) -> dict:
     """Initializes the Configuration schema"""
     SCHEMA_CONFIG = {

@@ -2,7 +2,11 @@ import os
 
 try:
     import vertexai.preview
-    from vertexai.preview.generative_models import GenerativeModel, Content, Part
+    from vertexai.preview.generative_models import (
+        GenerativeModel,
+        Content,
+        Part,
+    )
 except:
     pass
 
@@ -30,7 +34,9 @@ class GeminiGenerator(Generator):
             "GOOGLE_CLOUD_PROJECT",
         ]
         self.streamable = True
-        self.model_name = os.getenv("GEMINI_MODEL", "gemini-1.5-pro-preview-0409")
+        self.model_name = os.getenv(
+            "GEMINI_MODEL", "gemini-1.5-pro-preview-0409"
+        )
         self.context_window = 10000
 
     async def generate_stream(
@@ -67,8 +73,10 @@ class GeminiGenerator(Generator):
                 "gemini-1.5-pro-preview-0409",
             )
 
-            completion = await generative_multimodal_model.generate_content_async(
-                stream=True, contents=messages
+            completion = (
+                await generative_multimodal_model.generate_content_async(
+                    stream=True, contents=messages
+                )
             )
 
             iter = completion.__aiter__()
@@ -79,8 +87,12 @@ class GeminiGenerator(Generator):
                     if len(chunk.candidates) > 0:
                         if len(chunk.candidates[0].content.parts) > 0:
                             yield {
-                                "message": chunk.candidates[0].content.parts[0].text,
-                                "finish_reason": chunk.candidates[0].finish_reason,
+                                "message": chunk.candidates[0]
+                                .content.parts[0]
+                                .text,
+                                "finish_reason": chunk.candidates[
+                                    0
+                                ].finish_reason,
                             }
                         else:
                             yield {
@@ -99,7 +111,10 @@ class GeminiGenerator(Generator):
             raise
 
     def prepare_messages(
-        self, queries: list[str], context: list[str], conversation: dict[str, str]
+        self,
+        queries: list[str],
+        context: list[str],
+        conversation: dict[str, str],
     ):
         """
         Prepares a list of messages formatted for a Retrieval Augmented Generation chatbot system, including system instructions, previous conversation, and a new user query with context.
@@ -116,7 +131,9 @@ class GeminiGenerator(Generator):
 
         for message in conversation:
             messages.append(
-                Content(role=message.type, parts=[Part.from_text(message.content)])
+                Content(
+                    role=message.type, parts=[Part.from_text(message.content)]
+                )
             )
 
         query = " ".join(queries)

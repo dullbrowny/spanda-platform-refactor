@@ -25,11 +25,16 @@ class GitHubReader(Reader):
         self.description = "Retrieves all text files (.txt, .md, .mdx, .json) from a GitHub Repository and imports them into Verba. Use this format {owner}/{repo}/{branch}/{folder}"
 
     def load(
-        self, fileData: list[FileData], textValues: list[str], logging: list[dict]
+        self,
+        fileData: list[FileData],
+        textValues: list[str],
+        logging: list[dict],
     ) -> tuple[list[Document], list[str]]:
 
         if len(textValues) <= 0:
-            logging.append({"type": "ERROR", "message": f"No GitHub Link detected"})
+            logging.append(
+                {"type": "ERROR", "message": f"No GitHub Link detected"}
+            )
             return [], logging
         elif textValues[0] == "":
             logging.append({"type": "ERROR", "message": f"Empty GitHub URL"})
@@ -51,7 +56,9 @@ class GitHubReader(Reader):
 
         for _file in docs:
             try:
-                logging.append({"type": "INFO", "message": f"Downloading {_file}"})
+                logging.append(
+                    {"type": "INFO", "message": f"Downloading {_file}"}
+                )
                 content, link, _path = self.download_file(github_link, _file)
                 if ".json" in _file:
                     json_obj = json.loads(str(content))
@@ -67,7 +74,9 @@ class GitHubReader(Reader):
                         name=_file,
                         link=link,
                         path=_path,
-                        timestamp=str(datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+                        timestamp=str(
+                            datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        ),
                         reader=self.name,
                     )
 

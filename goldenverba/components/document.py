@@ -88,6 +88,7 @@ class Document:
         )
         # Assuming Chunk has a from_dict method
         document.chunks = [
-            Chunk.from_dict(chunk_data) for chunk_data in doc_dict.get("chunks", [])
+            Chunk.from_dict(chunk_data)
+            for chunk_data in doc_dict.get("chunks", [])
         ]
         return document

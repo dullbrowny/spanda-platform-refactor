@@ -4,10 +4,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
 @click.group()
 def cli():
     """Main command group for verba."""
     pass
+
 
 @cli.command()
 @click.option(
@@ -29,7 +31,10 @@ def start(port, host, prod):
     """
     Run the FastAPI application.
     """
-    uvicorn.run("goldenverba.server.api:app", host=host, port=port, reload=(not prod))
+    uvicorn.run(
+        "goldenverba.server.api:app", host=host, port=port, reload=(not prod)
+    )
+
 
 if __name__ == "__main__":
     cli()

@@ -13,7 +13,9 @@ from weaviate import Client
 try:
     import tiktoken
 except Exception:
-    msg.warn("tiktoken not installed, your base installation might be corrupted.")
+    msg.warn(
+        "tiktoken not installed, your base installation might be corrupted."
+    )
 
 from goldenverba.components.schema.schema_generation import (
     EMBEDDINGS,
@@ -59,11 +61,15 @@ class VerbaComponent:
                             f"Updating {self.name} config ({_k}) {self.config[_k].text} -> {new_config[_k].get('text','')}"
                         )
                 if self.config[_k].type == "number":
-                    if self.config[_k].value != int(new_config[_k].get("value", 0)):
+                    if self.config[_k].value != int(
+                        new_config[_k].get("value", 0)
+                    ):
                         msg.info(
                             f"Updating {self.name} config ({_k}) {self.config[_k].value} -> {new_config[_k].get('value',0)}"
                         )
-                        self.config[_k].value = int(new_config[_k].get("value", 0))
+                        self.config[_k].value = int(
+                            new_config[_k].get("value", 0)
+                        )
 
     def check_available(self, envs, libs) -> bool:
         if self.requires_env:
@@ -94,14 +100,19 @@ class Reader(VerbaComponent):
         }
 
     def load(
-        self, fileData: list[FileData], textValues: list[str], logging: list[dict]
+        self,
+        fileData: list[FileData],
+        textValues: list[str],
+        logging: list[dict],
     ) -> tuple[list[Document], list[str]]:
         """Ingest data into Weaviate
         @parameter: fileData : list[FileData] - List of filename and bytes pairs
         @parameter: textValues : list[str] - List of strings, e.g. URLs etc
         @returns tuple[list[Document], list[str]] - A tuple of a list of documents and a list of strings displayed as logging on the frontend.
         """
-        raise NotImplementedError("load method must be implemented by a subclass.")
+        raise NotImplementedError(
+            "load method must be implemented by a subclass."
+        )
 
 
 class Chunker(VerbaComponent):
@@ -113,7 +124,9 @@ class Chunker(VerbaComponent):
         super().__init__()
         self.config = {
             "units": InputNumber(
-                type="number", value=100, description="Choose the units per chunks"
+                type="number",
+                value=100,
+                description="Choose the units per chunks",
             ),
             "overlap": InputNumber(
                 type="number",
@@ -122,13 +135,17 @@ class Chunker(VerbaComponent):
             ),
         }
 
-    def chunk(self, documents: list[Document], logging: list[dict]) -> list[Document]:
+    def chunk(
+        self, documents: list[Document], logging: list[dict]
+    ) -> list[Document]:
         """Chunk verba documents into chunks based on units and overlap.
 
         @parameter: documents : list[Document] - List of Verba documents
         @returns list[str] - List of documents that contain the chunks.
         """
-        raise NotImplementedError("chunk method must be implemented by a subclass.")
+        raise NotImplementedError(
+            "chunk method must be implemented by a subclass."
+        )
 
 
 class Embedder(VerbaComponent):
@@ -152,7 +169,9 @@ class Embedder(VerbaComponent):
         @parameter: batch_size : int - Batch Size of Input
         @returns bool - Bool whether the embedding what successful.
         """
-        raise NotImplementedError("embed method must be implemented by a subclass.")
+        raise NotImplementedError(
+            "embed method must be implemented by a subclass."
+        )
 
     def import_data(
         self, documents: list[Document], client: Client, logging: list[dict]
@@ -164,7 +183,10 @@ class Embedder(VerbaComponent):
         @returns bool - Bool whether the embedding what successful.
         """
         try:
-            if self.vectorizer not in VECTORIZERS and self.vectorizer not in EMBEDDINGS:
+            if (
+                self.vectorizer not in VECTORIZERS
+                and self.vectorizer not in EMBEDDINGS
+            ):
                 msg.fail(f"Vectorizer of {self.name} not found")
                 return False
 
@@ -201,7 +223,9 @@ class Embedder(VerbaComponent):
                         "timestamp": str(document.timestamp),
                     }
 
-                    class_name = "VERBA_Document_" + strip_non_letters(self.vectorizer)
+                    class_name = "VERBA_Document_" + strip_non_letters(
+                        self.vectorizer
+                    )
                     uuid = client.batch.add_data_object(properties, class_name)
 
                     for chunk in document.chunks:
@@ -209,7 +233,9 @@ class Embedder(VerbaComponent):
 
                 chunk_count = 0
                 for _batch_id, chunk_batch in tqdm(
-                    enumerate(batches), total=len(batches), desc="Importing batches"
+                    enumerate(batches),
+                    total=len(batches),
+                    desc="Importing batches",
                 ):
                     with client.batch as batch:
                         batch.batch_size = len(chunk_batch)
@@ -230,16 +256,23 @@ class Embedder(VerbaComponent):
                             # Check if vector already exists
                             if chunk.vector is None:
                                 try:
-                                    client.batch.add_data_object(properties, class_name)
+                                    client.batch.add_data_object(
+                                        properties, class_name
+                                    )
                                 except Exception as e:
-                                    msg.fail(f"Error adding chunk to Weaviate: {e}")
+                                    msg.fail(
+                                        f"Error adding chunk to Weaviate: {e}"
+                                    )
                             else:
                                 client.batch.add_data_object(
                                     properties, class_name, vector=chunk.vector
                                 )
 
                             wait_time_ms = int(
-                                os.getenv("WAIT_TIME_BETWEEN_INGESTION_QUERIES_MS", "0")
+                                os.getenv(
+                                    "WAIT_TIME_BETWEEN_INGESTION_QUERIES_MS",
+                                    "0",
+                                )
                             )
                             if wait_time_ms > 0:
                                 time.sleep(float(wait_time_ms) / 1000)
@@ -256,7 +289,10 @@ class Embedder(VerbaComponent):
             return logging
         except Exception as e:
             logging.append(
-                {"type": "ERROR", "message": f"Embedding not successful: {str(e)}"}
+                {
+                    "type": "ERROR",
+                    "message": f"Embedding not successful: {str(e)}",
+                }
             )
             raise Exception(e)
 
@@ -305,7 +341,9 @@ class Embedder(VerbaComponent):
 
             if len(results["data"]["Get"][chunk_class_name]) != chunk_count:
                 # Rollback if fails
-                self.remove_document(client, doc_name, doc_class_name, chunk_class_name)
+                self.remove_document(
+                    client, doc_name, doc_class_name, chunk_class_name
+                )
                 raise Exception(
                     f"Chunk mismatch for {doc_uuid} {len(results['data']['Get'][chunk_class_name])} != {chunk_count}"
                 )
@@ -313,7 +351,11 @@ class Embedder(VerbaComponent):
             raise Exception(f"Document {doc_uuid} not found {document}")
 
     def remove_document(
-        self, client: Client, doc_name: str, doc_class_name: str, chunk_class_name: str
+        self,
+        client: Client,
+        doc_name: str,
+        doc_class_name: str,
+        chunk_class_name: str,
     ) -> None:
         """Deletes documents and its chunks
         @parameter: client : Client - Weaviate Client
@@ -323,12 +365,20 @@ class Embedder(VerbaComponent):
         """
         client.batch.delete_objects(
             class_name=doc_class_name,
-            where={"path": ["doc_name"], "operator": "Equal", "valueText": doc_name},
+            where={
+                "path": ["doc_name"],
+                "operator": "Equal",
+                "valueText": doc_name,
+            },
         )
 
         client.batch.delete_objects(
             class_name=chunk_class_name,
-            where={"path": ["doc_name"], "operator": "Equal", "valueText": doc_name},
+            where={
+                "path": ["doc_name"],
+                "operator": "Equal",
+                "valueText": doc_name,
+            },
         )
 
         msg.warn(f"Deleted document {doc_name} and its chunks")
@@ -341,7 +391,11 @@ class Embedder(VerbaComponent):
 
         client.batch.delete_objects(
             class_name=chunk_class_name,
-            where={"path": ["doc_uuid"], "operator": "Equal", "valueText": doc_id},
+            where={
+                "path": ["doc_uuid"],
+                "operator": "Equal",
+                "valueText": doc_id,
+            },
         )
 
         msg.warn(f"Deleted document {doc_id} and its chunks")
@@ -356,7 +410,12 @@ class Embedder(VerbaComponent):
         return "VERBA_Cache_" + strip_non_letters(self.vectorizer)
 
     def search_documents(
-        self, client: Client, query: str, doc_type: str, page: int, pageSize: int
+        self,
+        client: Client,
+        query: str,
+        doc_type: str,
+        page: int,
+        pageSize: int,
     ) -> list:
         """Search for documents from Weaviate
         @parameter query_string : str - Search query
@@ -411,7 +470,9 @@ class Embedder(VerbaComponent):
             "vectorize_query method must be implemented by a subclass."
         )
 
-    def conversation_to_query(self, queries: list[str], conversation: dict) -> str:
+    def conversation_to_query(
+        self, queries: list[str], conversation: dict
+    ) -> str:
         query = ""
 
         if len(conversation) > 1:
@@ -455,12 +516,16 @@ class Embedder(VerbaComponent):
             and len(match_results["data"]["Get"][self.get_cache_class()]) > 0
             and (
                 query
-                == match_results["data"]["Get"][self.get_cache_class()][0]["query"]
+                == match_results["data"]["Get"][self.get_cache_class()][0][
+                    "query"
+                ]
             )
         ):
             msg.good("Direct match from cache")
             return (
-                match_results["data"]["Get"][self.get_cache_class()][0]["system"],
+                match_results["data"]["Get"][self.get_cache_class()][0][
+                    "system"
+                ],
                 0.0,
             )
 
@@ -525,7 +590,9 @@ class Embedder(VerbaComponent):
                     properties, self.get_cache_class(), vector=vector
                 )
             else:
-                client.batch.add_data_object(properties, self.get_cache_class())
+                client.batch.add_data_object(
+                    properties, self.get_cache_class()
+                )
 
 
 class Retriever(VerbaComponent):
@@ -548,8 +615,10 @@ class Retriever(VerbaComponent):
         @parameter: embedder : Embedder - Current selected Embedder
         @returns tuple(list[Chunk],str) - List of retrieved chunks and the context string.
         """
-        raise NotImplementedError("load method must be implemented by a subclass.")
-    
+        raise NotImplementedError(
+            "load method must be implemented by a subclass."
+        )
+
     def cutoff_text(self, text: str, content_length: int) -> str:
         encoding = tiktoken.encoding_for_model("gpt-3.5-turbo")
 
@@ -592,7 +661,9 @@ class Generator(VerbaComponent):
         """
         if conversation is None:
             conversation = {}
-        raise NotImplementedError("generate method must be implemented by a subclass.")
+        raise NotImplementedError(
+            "generate method must be implemented by a subclass."
+        )
 
     async def generate_stream(
         self,
@@ -613,7 +684,10 @@ class Generator(VerbaComponent):
         )
 
     def prepare_messages(
-        self, queries: list[str], context: list[str], conversation: dict[str, str]
+        self,
+        queries: list[str],
+        context: list[str],
+        conversation: dict[str, str],
     ) -> any:
         """
         Prepares a list of messages formatted for a Retrieval Augmented Generation chatbot system, including system instructions, previous conversation, and a new user query with context.

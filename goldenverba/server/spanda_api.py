@@ -9,7 +9,15 @@ import json
 import httpx
 import re
 import ollama
-from spanda_utils import answer_gen, grading_assistant, instructor_eval, generate_question_variants, extract_variants, make_request, dimensions
+from spanda_utils import (
+    answer_gen,
+    grading_assistant,
+    instructor_eval,
+    generate_question_variants,
+    extract_variants,
+    make_request,
+    dimensions,
+)
 
 import os
 from pathlib import Path
@@ -18,11 +26,7 @@ from dotenv import load_dotenv
 from starlette.websockets import WebSocketDisconnect
 from wasabi import msg  # type: ignore[import]
 import time
-from goldenverba.server.bitsp import(
-    ollama_afe,
-    ollama_aga,
-    ollama_aqg
-)
+from goldenverba.server.bitsp import ollama_afe, ollama_aga, ollama_aqg
 import logging
 from goldenverba import verba_manager
 from goldenverba.server.types import (
@@ -33,7 +37,7 @@ from goldenverba.server.types import (
     GetDocumentPayload,
     SearchQueryPayload,
     ImportPayload,
-    QueryRequest
+    QueryRequest,
 )
 from goldenverba.server.util import get_config, set_config, setup_managers
 
@@ -59,9 +63,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 @app.get("/")
 def read_root():
     return {"message": "Welcome to the Spanda.API!"}
+
 
 if production_key == "True":
     msg.info("API runs in Production Mode")
@@ -69,8 +75,9 @@ if production_key == "True":
 else:
     production = False
 
+
 # All 3 projects - AGA, AQG and AFE
-# This endpoint is responsible for importing data and performing several operations, including loading, filtering, chunking, and embedding documents. 
+# This endpoint is responsible for importing data and performing several operations, including loading, filtering, chunking, and embedding documents.
 @app.post("/api/spandaimport")
 async def import_data(payload: ImportPayload):
 
@@ -78,7 +85,10 @@ async def import_data(payload: ImportPayload):
 
     if production:
         logging.append(
-            {"type": "ERROR", "message": "Can't import when in production mode"}
+            {
+                "type": "ERROR",
+                "message": "Can't import when in production mode",
+            }
         )
         return JSONResponse(
             content={
@@ -105,8 +115,9 @@ async def import_data(payload: ImportPayload):
                 "logging": logging,
             }
         )
-    
-# Automated grading assistant 
+
+
+# Automated grading assistant
 @app.post("/api/ollamaAGA")
 async def ollama_aga(request: QueryRequest):
     query = request.query
@@ -115,11 +126,9 @@ async def ollama_aga(request: QueryRequest):
         raise HTTPException(status_code=500, detail="Failed to fetch context")
     variants, scores = await grading_assistant(query, context)
     print(scores)
-    response = {
-        "justification": variants,
-        "scores": scores
-    }
+    response = {"justification": variants, "scores": scores}
     return response
+
 
 # Variants of a question paper
 @app.post("/api/ollamaAQG")
@@ -127,10 +136,7 @@ async def ollama_aqg(request: QueryRequest):
     query = request.query
     context = await make_request(query)
     variants, variants_dict = await generate_question_variants(query, context)
-    response = {
-        "variants": variants,
-        "variants_dict": variants_dict
-    }
+    response = {"variants": variants, "variants_dict": variants_dict}
     return {"variants": variants}
 
 
@@ -143,24 +149,28 @@ async def ollama_afe(request: QueryRequest):
 
     for dimension, explanation in dimensions.items():
         query = f"Judge {instructor_name} based on {dimension}."
-        context = await make_request(query)  # Assuming make_request is defined elsewhere to get the context
+        context = await make_request(
+            query
+        )  # Assuming make_request is defined elsewhere to get the context
         # print(f"CONTEXT for {dimension}:")
         # print(context)  # Print the context generated
-        result_responses, result_scores = await instructor_eval(instructor_name, context, dimension, explanation)
+        result_responses, result_scores = await instructor_eval(
+            instructor_name, context, dimension, explanation
+        )
         print(result_responses)
         print(result_scores)
         # Extract only the message['content'] part and store it
-        all_responses[dimension] = result_responses[dimension]['message']['content']
+        all_responses[dimension] = result_responses[dimension]["message"][
+            "content"
+        ]
         all_scores[dimension] = result_scores[dimension]
-    
+
     print("SCORES:")
     print(json.dumps(all_scores, indent=2))
-    response = {
-        "DOCUMENT": all_responses,
-        "SCORES": all_scores
-    }
-    
+    response = {"DOCUMENT": all_responses, "SCORES": all_scores}
+
     return response
+
 
 # Variants of a question paper - answergen
 @app.post("/api/answergen")
@@ -173,6 +183,8 @@ async def ollama_aqg(request: QueryRequest):
     }
     return response
 
+
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8000)

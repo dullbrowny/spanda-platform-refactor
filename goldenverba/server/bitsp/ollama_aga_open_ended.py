@@ -2,15 +2,16 @@ import ollama
 import httpx
 import asyncio
 
+
 async def make_request(query):
-    async with httpx.AsyncClient(timeout=None) as client:  # Set timeout to None to wait indefinitely
+    async with httpx.AsyncClient(
+        timeout=None
+    ) as client:  # Set timeout to None to wait indefinitely
         # Define the endpoint URL
         query_url = "http://localhost:8000/api/query"
 
         # Define the payload
-        payload = {
-            "query": query
-        }
+        payload = {"query": query}
 
         try:
             # Make a POST request to the /api/query endpoint
@@ -20,12 +21,16 @@ async def make_request(query):
                 print("Successfully retrieved context!")
                 return response_data.get("context", "No context provided")
             else:
-                print(f"Query Request failed with status code {response_query.status_code}")
+                print(
+                    f"Query Request failed with status code {response_query.status_code}"
+                )
                 return None
         except httpx.RequestError as exc:
-            print(f"An error occurred while requesting {exc.request.url!r}: {exc}")
+            print(
+                f"An error occurred while requesting {exc.request.url!r}: {exc}"
+            )
             return None
-        
+
 
 async def grading_assistant(question_answer_pair, context):
     print(context)
@@ -124,33 +129,36 @@ async def grading_assistant(question_answer_pair, context):
 
             # Please adhere strictly to this grading system.
                             """
-    
+
     # Define the payload
     payload = {
         "messages": [
-            {
-                "role": "system",
-                "content": rubric_content
-            },
+            {"role": "system", "content": rubric_content},
             {
                 "role": "user",
-                "content": f"Grade the following question-answer pair using the grading rubric and context provided - {question_answer_pair}."
-            }
+                "content": f"Grade the following question-answer pair using the grading rubric and context provided - {question_answer_pair}.",
+            },
         ],
         "stream": False,
         "options": {
-            "top_k": 1, 
-            "top_p": 1, 
-            "temperature": 0, 
-            "seed": 100, 
-        }
+            "top_k": 1,
+            "top_p": 1,
+            "temperature": 0,
+            "seed": 100,
+        },
     }
 
     # Asynchronous call to Ollama API
-    response = await asyncio.to_thread(ollama.chat, model='llama3', messages=payload['messages'], stream=payload['stream'])
+    response = await asyncio.to_thread(
+        ollama.chat,
+        model="llama3",
+        messages=payload["messages"],
+        stream=payload["stream"],
+    )
 
     # Return the response content
-    return response['message']['content']
+    return response["message"]["content"]
+
 
 async def query_to_context_match(query, context):
     # Join the context into a single string
@@ -161,23 +169,21 @@ async def query_to_context_match(query, context):
     # Define the payload for Ollama
     payload = {
         "messages": [
-            {
-                "role": "system",
-                "content": context_query_match
-            },
+            {"role": "system", "content": context_query_match},
             {
                 "role": "user",
                 "content": f"With this provided context: '{context}' Please look at this query: '{query}'.",
-            }
+            },
         ],
         "stream": False,
         "options": {
-            "top_k": 1, 
-            "top_p": 1, 
-            "temperature": 0, 
-            "seed": 100, 
-        }
+            "top_k": 1,
+            "top_p": 1,
+            "temperature": 0,
+            "seed": 100,
+        },
     }
+
 
 # # Example usage
 # async def main():

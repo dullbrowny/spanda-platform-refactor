@@ -4,8 +4,11 @@ import json
 import re
 from ollama import chat
 
+
 async def make_request(query):
-    async with httpx.AsyncClient(timeout=None) as client:  # Set timeout to None to wait indefinitely
+    async with httpx.AsyncClient(
+        timeout=None
+    ) as client:  # Set timeout to None to wait indefinitely
         query_url = "http://localhost:8000/api/query"
         payload = {"query": query}
 
@@ -22,13 +25,20 @@ async def make_request(query):
 
                 return response_data.get("context", "No context provided")
             else:
-                print(f"Query Request failed with status code {response_query.status_code}")
+                print(
+                    f"Query Request failed with status code {response_query.status_code}"
+                )
                 return None
         except httpx.RequestError as exc:
-            print(f"An error occurred while requesting {exc.request.url!r}: {exc}")
+            print(
+                f"An error occurred while requesting {exc.request.url!r}: {exc}"
+            )
             return None
 
-async def instructor_eval(instructor_name, context, score_criterion, explanation):
+
+async def instructor_eval(
+    instructor_name, context, score_criterion, explanation
+):
     user_context = " ".join(context)
 
     responses = {}
@@ -85,28 +95,38 @@ async def instructor_eval(instructor_name, context, score_criterion, explanation
                 Rate strictly on a scale of 0 to 3 using whole numbers only.
 
                 Ensure the examples are directly relevant to the evaluation criterion and discard any irrelevant excerpts.
-                """
-            }
+                """,
+            },
         ],
         "stream": False,
         "options": {
-            "top_k": 1, 
-            "top_p": 1, 
-            "temperature": 0, 
-            "seed": 100, 
-        }
+            "top_k": 1,
+            "top_p": 1,
+            "temperature": 0,
+            "seed": 100,
+        },
     }
 
-    response = await asyncio.to_thread(chat, model='llama3', messages=payload['messages'], stream=payload['stream'])
+    response = await asyncio.to_thread(
+        chat,
+        model="llama3",
+        messages=payload["messages"],
+        stream=payload["stream"],
+    )
 
     responses[score_criterion] = response
 
-    content = response['message']['content']
+    content = response["message"]["content"]
 
-    match = re.search(r'score:', content, re.IGNORECASE)
+    match = re.search(r"score:", content, re.IGNORECASE)
     if match:
         score_index = match.start()
-        score_value = content[score_index + len("Score:"):].strip().split("\n")[0].strip()
+        score_value = (
+            content[score_index + len("Score:") :]
+            .strip()
+            .split("\n")[0]
+            .strip()
+        )
         scores_dict[score_criterion] = score_value
     else:
         scores_dict[score_criterion] = "N/A"

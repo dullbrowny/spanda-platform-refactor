@@ -1,4 +1,14 @@
-from fastapi import FastAPI, WebSocket, File, UploadFile, status, HTTPException, Request, Query, Depends
+from fastapi import (
+    FastAPI,
+    WebSocket,
+    File,
+    UploadFile,
+    status,
+    HTTPException,
+    Request,
+    Query,
+    Depends,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -11,12 +21,12 @@ import torch
 from typing import Optional
 import json
 import httpx
-import re , asyncio
+import re, asyncio
 import zipfile
 import ollama
 from pydantic import BaseModel
 import base64
-import logging 
+import logging
 from typing import List
 from fastapi import BackgroundTasks
 import os
@@ -24,12 +34,22 @@ from pathlib import Path
 from dotenv import load_dotenv
 from starlette.websockets import WebSocketDisconnect
 from goldenverba.components.generation.OllamaGenerator import OllamaGenerator
-from goldenverba.server.types import CourseIDRequest,AuthDetails, Token, TokenData, Course, TokenWithRoles, RequestAGA, QueryRequestResume
+from goldenverba.server.types import (
+    CourseIDRequest,
+    AuthDetails,
+    Token,
+    TokenData,
+    Course,
+    TokenWithRoles,
+    RequestAGA,
+    QueryRequestResume,
+)
 from wasabi import msg  # type: ignore[import]
 import time
 import hashlib
 import random
 import string
+
 # from goldenverba.server.bitsp import(
 #     ollama_afe,
 #     ollama_aga,
@@ -49,7 +69,7 @@ from goldenverba.server.types import (
     QueryRequest,
     MoodleRequest,
     QueryRequestaqg,
-    QueryRequestWithGroundTruth
+    QueryRequestWithGroundTruth,
 )
 from typing import Dict
 from goldenverba.server.spanda_utils import chatbot, dimensions_AFE
@@ -68,8 +88,9 @@ import hashlib
 from bs4 import BeautifulSoup
 import random
 import string
-from datetime import datetime, timedelta 
+from datetime import datetime, timedelta
 from goldenverba.server.util import get_config, set_config, setup_managers
+
 logger = logging.getLogger("API")
 load_dotenv()
 # Replace with your Moodle instance URL and token
@@ -86,13 +107,13 @@ load_dotenv()
 # load_dotenv(dotenv_path)
 
 # Now you can access the environment variables
-SECRET_KEY = os.getenv('SECRET_KEY')
-ALGORITHM = os.getenv('ALGORITHM')
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv('ACCESS_TOKEN_EXPIRE_MINUTES'))
-MOODLE_URL = os.getenv('MOODLE_URL')
-LOGIN_URL = f'{MOODLE_URL}/login/index.php?altlogin=1' 
-ACCESS_URL = f'{MOODLE_URL}/webservice/rest/server.php'
-TOKEN = os.getenv('TOKEN')
+SECRET_KEY = os.getenv("SECRET_KEY")
+ALGORITHM = os.getenv("ALGORITHM")
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES"))
+MOODLE_URL = os.getenv("MOODLE_URL")
+LOGIN_URL = f"{MOODLE_URL}/login/index.php?altlogin=1"
+ACCESS_URL = f"{MOODLE_URL}/webservice/rest/server.php"
+TOKEN = os.getenv("TOKEN")
 # Check if runs in production
 production_key = os.environ.get("VERBA_PRODUCTION", "")
 tag = os.environ.get("VERBA_GOOGLE_TAG", "")
@@ -117,11 +138,11 @@ origins = [
     "https://verba-golden-ragtriever.onrender.com",
     "http://localhost:8000",
     "http://localhost:1511",
-    "http://localhost/moodle", 
-    "http://localhost", 
+    "http://localhost/moodle",
+    "http://localhost",
     "https://taxila-spanda.wilp-connect.net",
     "https://bitsmart.vercel.app",
-    "http://host.docker.internal"
+    "http://host.docker.internal",
 ]
 
 app.add_middleware(
@@ -142,12 +163,17 @@ app.mount(
 )
 
 # Serve the main page and other static files
-app.mount("/static", StaticFiles(directory=BASE_DIR / "frontend/out"), name="app")
+app.mount(
+    "/static", StaticFiles(directory=BASE_DIR / "frontend/out"), name="app"
+)
+
 
 @app.get("/")
 @app.head("/")
 async def serve_frontend():
     return FileResponse(os.path.join(BASE_DIR, "frontend/out/index.html"))
+
+
 # Constants
 editing_teacher_courses: List[str] = []
 
@@ -158,41 +184,42 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 def moodle_api_call(params, extra_params=None):
     if extra_params:
         params.update(extra_params)
-    endpoint = f'{MOODLE_URL}/webservice/rest/server.php'
+    endpoint = f"{MOODLE_URL}/webservice/rest/server.php"
     response = requests.get(endpoint, params=params)
-    print(f"API Call to {params['wsfunction']} - Status Code: {response.status_code}")
+    print(
+        f"API Call to {params['wsfunction']} - Status Code: {response.status_code}"
+    )
     print(f"API Request URL: {response.url}")  # Log the full URL for debugging
 
     try:
         result = response.json()
     except ValueError as e:
-        raise ValueError(f"Error parsing JSON response: {response.text}") from e
+        raise ValueError(
+            f"Error parsing JSON response: {response.text}"
+        ) from e
 
-    if 'exception' in result:
+    if "exception" in result:
         raise Exception(f"Error: {result['exception']['message']}")
 
     return result
 
 
-
 async def context_relevance_filter(query: str, context: str) -> str:
-    evaluate_system_prompt = (
-        """You are an AI responsible for assessing whether the provided content is relevant to a specific query. Carefully analyze the content and determine if it directly addresses or provides pertinent information related to the query. Only respond with "YES" if the content is relevant, or "NO" if it is not. Do not provide any explanations, scores, or additional text—just a single word: "YES" or "NO"."""
-    )
-    evaluate_user_prompt = (
-        f"""
+    evaluate_system_prompt = """You are an AI responsible for assessing whether the provided content is relevant to a specific query. Carefully analyze the content and determine if it directly addresses or provides pertinent information related to the query. Only respond with "YES" if the content is relevant, or "NO" if it is not. Do not provide any explanations, scores, or additional text—just a single word: "YES" or "NO"."""
+    evaluate_user_prompt = f"""
         Content: {context}
 
         Query: {query}
 
         You are an AI responsible for assessing whether the provided content is relevant to a specific query. Carefully analyze the content and determine if it directly addresses or provides pertinent information related to the query. Only respond with "YES" if the content is relevant, or "NO" if it is not. Do not provide any explanations, scores, or additional text—just a single word: "YES" or "NO".
         """
-    )
     request = QueryRequest(query=query)
-    is_context_relevant = await generate_response(request, context, evaluate_system_prompt, evaluate_user_prompt)
+    is_context_relevant = await generate_response(
+        request, context, evaluate_system_prompt, evaluate_user_prompt
+    )
     # print("Is this context relevant? ")
     print("Is this context relevant? " + is_context_relevant)
-    if is_context_relevant.lower() == 'no':
+    if is_context_relevant.lower() == "no":
         return " "  # Returns an empty coroutine
     return context
 
@@ -200,12 +227,9 @@ async def context_relevance_filter(query: str, context: str) -> str:
 # Function to get the user ID by username
 def authenticate_user(username: str, password: str) -> Optional[dict]:
     global editing_teacher_courses  # Access the global variable
-    
-    credentials = {
-        'username': username,
-        'password': password
-    }
-    
+
+    credentials = {"username": username, "password": password}
+
     with requests.Session() as session:
         try:
             response = session.get(LOGIN_URL)
@@ -214,16 +238,18 @@ def authenticate_user(username: str, password: str) -> Optional[dict]:
         except requests.RequestException as e:
             print(f"Failed to get login page: {e}")
             return None
-        
-        soup = BeautifulSoup(response.text, 'html.parser')
-        logintoken = soup.find('input', {'name': 'logintoken'})
+
+        soup = BeautifulSoup(response.text, "html.parser")
+        logintoken = soup.find("input", {"name": "logintoken"})
         if logintoken:
-            credentials['logintoken'] = logintoken['value']
-            print("Login token found:", logintoken['value'])
+            credentials["logintoken"] = logintoken["value"]
+            print("Login token found:", logintoken["value"])
         else:
-            print("Login token not found. Check if the login page structure has changed.")
+            print(
+                "Login token not found. Check if the login page structure has changed."
+            )
             return None
-        
+
         try:
             response = session.post(LOGIN_URL, data=credentials)
             response.raise_for_status()
@@ -231,8 +257,8 @@ def authenticate_user(username: str, password: str) -> Optional[dict]:
         except requests.RequestException as e:
             print(f"Login failed: {e}")
             return None
-        
-        if 'Log out' in response.text:
+
+        if "Log out" in response.text:
             print("Login successful.")
             userid = get_user_id_by_username(TOKEN, ACCESS_URL, username)
             if userid:
@@ -240,29 +266,45 @@ def authenticate_user(username: str, password: str) -> Optional[dict]:
                 courses = get_user_courses(TOKEN, ACCESS_URL, userid)
                 if not courses:
                     print("No courses found for user.")
-                
+
                 global editing_teacher_courses
                 editing_teacher_courses = []  # Reset the global variable
                 roles_found = []
-                
+
                 for course in courses:
-                    roles = get_user_role_in_course(TOKEN, ACCESS_URL, course['id'], userid)
-                    course_roles = [role['shortname'] for role in roles]
-                    print("Roles found for course:", course.get('shortname', 'Unnamed Course'), course_roles)
-                    
-                    if 'bitseditingteacher' in course_roles:
-                        editing_teacher_courses.append(course['shortname'])  # Append only the shortname
-                        roles_found.append('bitseditingteacher')
-                        print("User has 'bitseditingteacher' role in course:", course.get('shortname', 'Unnamed Course'))
-                    
-                    if 'bitsmanager' in course_roles:
-                        roles_found.append('bitsmanager')
-                        print("User has 'bitsmanager' role in course:", course.get('shortname', 'Unnamed Course'))
-                        
+                    roles = get_user_role_in_course(
+                        TOKEN, ACCESS_URL, course["id"], userid
+                    )
+                    course_roles = [role["shortname"] for role in roles]
+                    print(
+                        "Roles found for course:",
+                        course.get("shortname", "Unnamed Course"),
+                        course_roles,
+                    )
+
+                    if "bitseditingteacher" in course_roles:
+                        editing_teacher_courses.append(
+                            course["shortname"]
+                        )  # Append only the shortname
+                        roles_found.append("bitseditingteacher")
+                        print(
+                            "User has 'bitseditingteacher' role in course:",
+                            course.get("shortname", "Unnamed Course"),
+                        )
+
+                    if "bitsmanager" in course_roles:
+                        roles_found.append("bitsmanager")
+                        print(
+                            "User has 'bitsmanager' role in course:",
+                            course.get("shortname", "Unnamed Course"),
+                        )
+
                 print("Roles found for user:", roles_found)
                 if roles_found:
                     # Generate an access token with the roles embedded in the payload
-                    token = create_access_token(data={"sub": username, "roles": roles_found})
+                    token = create_access_token(
+                        data={"sub": username, "roles": roles_found}
+                    )
                     return {"access_token": token, "roles": roles_found}
                 else:
                     print("No valid roles found for user.")
@@ -273,12 +315,21 @@ def authenticate_user(username: str, password: str) -> Optional[dict]:
         else:
             print("Login failed or unexpected response.")
             return None
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
+
+
+def create_access_token(
+    data: dict, expires_delta: Optional[timedelta] = None
+) -> str:
     to_encode = data.copy()
-    expire = datetime.utcnow() + (expires_delta if expires_delta else timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    expire = datetime.utcnow() + (
+        expires_delta
+        if expires_delta
+        else timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    )
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
+
 
 def verify_token(token: str) -> TokenData:
     try:
@@ -291,16 +342,18 @@ def verify_token(token: str) -> TokenData:
         print(f"Token verification failed: {e}")
         raise ValueError("Invalid authentication credentials")
 
+
 def get_current_user(request: Request) -> TokenData:
     auth_header = request.headers.get("Authorization")
     if auth_header is None or not auth_header.startswith("Bearer "):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authorization header missing or malformed"
+            detail="Authorization header missing or malformed",
         )
-    
-    token = auth_header[len("Bearer "):]
+
+    token = auth_header[len("Bearer ") :]
     return verify_token(token)
+
 
 def get_user_id_by_username(token, moodle_url, username):
     params = {
@@ -308,7 +361,7 @@ def get_user_id_by_username(token, moodle_url, username):
         "wsfunction": "core_user_get_users_by_field",
         "moodlewsrestformat": "json",
         "field": "username",
-        "values[0]": username
+        "values[0]": username,
     }
     try:
         response = requests.get(moodle_url, params=params)
@@ -317,17 +370,21 @@ def get_user_id_by_username(token, moodle_url, username):
         print("Response Text:", response.text)
         users = response.json()
         if users:
-            return users[0]['id']
-    except (requests.RequestException, requests.exceptions.JSONDecodeError) as e:
+            return users[0]["id"]
+    except (
+        requests.RequestException,
+        requests.exceptions.JSONDecodeError,
+    ) as e:
         print(f"Error fetching user ID: {e}")
     return None
+
 
 def get_user_courses(token, moodle_url, userid):
     params = {
         "wstoken": token,
         "wsfunction": "core_enrol_get_users_courses",
         "moodlewsrestformat": "json",
-        "userid": userid
+        "userid": userid,
     }
     try:
         response = requests.get(moodle_url, params=params)
@@ -335,16 +392,20 @@ def get_user_courses(token, moodle_url, userid):
         print("User courses fetch response status code:", response.status_code)
         print("Response Text:", response.text)
         return response.json()
-    except (requests.RequestException, requests.exceptions.JSONDecodeError) as e:
+    except (
+        requests.RequestException,
+        requests.exceptions.JSONDecodeError,
+    ) as e:
         print(f"Error fetching user courses: {e}")
     return []
+
 
 def get_user_role_in_course(token, moodle_url, courseid, userid):
     params = {
         "wstoken": token,
         "wsfunction": "core_enrol_get_enrolled_users",
         "moodlewsrestformat": "json",
-        "courseid": courseid
+        "courseid": courseid,
     }
     try:
         response = requests.get(moodle_url, params=params)
@@ -353,11 +414,15 @@ def get_user_role_in_course(token, moodle_url, courseid, userid):
         print("Response Text:", response.text)
         users = response.json()
         for user in users:
-            if user['id'] == userid:
-                return user['roles']
-    except (requests.RequestException, requests.exceptions.JSONDecodeError) as e:
+            if user["id"] == userid:
+                return user["roles"]
+    except (
+        requests.RequestException,
+        requests.exceptions.JSONDecodeError,
+    ) as e:
         print(f"Error fetching user roles: {e}")
     return []
+
 
 # FastAPI endpoints
 @app.post("/token", response_model=TokenWithRoles)
@@ -365,18 +430,20 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     auth_data = authenticate_user(form_data.username, form_data.password)
     print("AUTH", auth_data)
     if auth_data is None:
-        raise HTTPException(status_code=401, detail="No username or password found")
-    
+        raise HTTPException(
+            status_code=401, detail="No username or password found"
+        )
+
     print("Returning access token and roles:", auth_data)
     return {
         "access_token": auth_data["access_token"],
         "token_type": "bearer",
-        "roles": auth_data["roles"]
+        "roles": auth_data["roles"],
     }
 
 
 @app.get("/check-auth")
-async def check_auth(current_user: TokenData = Depends(get_current_user)): 
+async def check_auth(current_user: TokenData = Depends(get_current_user)):
     return {"status": "authenticated", "user": current_user.username}
 
 
@@ -386,14 +453,15 @@ def get_editing_teacher_courses():
         raise HTTPException(status_code=404, detail="No courses found.")
     return editing_teacher_courses
 
+
 # @app.post("/api/spandachat")
 # async def spanda_chat(request: QueryRequest, token: str = Depends(oauth2_scheme)):
-    
+
 #     get_current_user(token)
 #     context = await make_request(request.query)
 #     if context is None:
 #         raise HTTPException(status_code=500, detail="Failed to fetch context")
-    
+
 #     answer = await chatbot(request.query, context)
 #     return {"answer": answer}
 
@@ -402,6 +470,7 @@ def get_editing_teacher_courses():
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
 @app.get("/api/health")
 async def health_check():
     try:
@@ -409,7 +478,11 @@ async def health_check():
         if manager.client.is_ready():
             logger.info("Database is ready.")
             return JSONResponse(
-                content={"message": "Alive!", "production": production, "gtag": tag}
+                content={
+                    "message": "Alive!",
+                    "production": production,
+                    "gtag": tag,
+                }
             )
         else:
             logger.warning("Database not ready.")
@@ -431,6 +504,7 @@ async def health_check():
             },
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         )
+
 
 # Get Status meta data
 @app.get("/api/get_status")
@@ -475,13 +549,16 @@ async def get_status():
         msg.fail(f"Status retrieval failed: {str(e)}")
         return JSONResponse(content=data)
 
+
 # Get Configuration
 @app.get("/api/config")
 async def retrieve_config():
     try:
         config = get_config(manager)
         msg.info("Config Retrieved")
-        return JSONResponse(status_code=200, content={"data": config, "error": ""})
+        return JSONResponse(
+            status_code=200, content={"data": config, "error": ""}
+        )
 
     except Exception as e:
         msg.warn(f"Could not retrieve configuration: {str(e)}")
@@ -493,7 +570,9 @@ async def retrieve_config():
             },
         )
 
+
 ### WEBSOCKETS
+
 
 @app.websocket("/ws/generate_stream")
 async def websocket_generate_stream(websocket: WebSocket):
@@ -524,7 +603,9 @@ async def websocket_generate_stream(websocket: WebSocket):
             )
         msg.good("Succesfully streamed answer")
 
+
 ### POST
+
 
 # Reset Verba
 @app.post("/api/reset")
@@ -551,6 +632,7 @@ async def reset_verba(payload: ResetPayload):
 
     return JSONResponse(status_code=200, content={})
 
+
 # Receive query and return chunks and query answer
 @app.post("/api/import")
 async def import_data(payload: ImportPayload):
@@ -560,7 +642,10 @@ async def import_data(payload: ImportPayload):
     print(f"Received payload: {payload}")
     if production:
         logging.append(
-            {"type": "ERROR", "message": "Can't import when in production mode"}
+            {
+                "type": "ERROR",
+                "message": "Can't import when in production mode",
+            }
         )
         return JSONResponse(
             content={
@@ -588,6 +673,7 @@ async def import_data(payload: ImportPayload):
             }
         )
 
+
 @app.post("/api/set_config")
 async def update_config(payload: ConfigPayload):
 
@@ -611,6 +697,7 @@ async def update_config(payload: ConfigPayload):
         }
     )
 
+
 # Receive query and return chunks and query answer
 @app.post("/api/query")
 async def query(payload: QueryPayload):
@@ -620,7 +707,9 @@ async def query(payload: QueryPayload):
     # print(payload.course_id + "inapi.py")
 
     try:
-        chunks, context = manager.retrieve_chunks(payload.query, payload.course_id)
+        chunks, context = manager.retrieve_chunks(
+            payload.query, payload.course_id
+        )
         retrieved_chunks = [
             {
                 "text": chunk.text,
@@ -633,8 +722,10 @@ async def query(payload: QueryPayload):
             for chunk in chunks
         ]
         # print(retrieved_chunks)
-        elapsed_time = round(time.time() - start_time, 2)  
-        msg.good(f"Succesfully processed query: {payload.query} in {elapsed_time}s")    
+        elapsed_time = round(time.time() - start_time, 2)
+        msg.good(
+            f"Succesfully processed query: {payload.query} in {elapsed_time}s"
+        )
 
         if len(chunks) == 0:
             return JSONResponse(
@@ -659,12 +750,13 @@ async def query(payload: QueryPayload):
         msg.warn(f"Query failed: {str(e)}")
         return JSONResponse(
             content={
-                    "chunks": [],
-                    "took": 0,
-                    "context": "",
-                    "error": f"Something went wrong: {str(e)}",
+                "chunks": [],
+                "took": 0,
+                "context": "",
+                "error": f"Something went wrong: {str(e)}",
             }
         )
+
 
 # Retrieve auto complete suggestions based on user input
 @app.post("/api/suggestions")
@@ -683,6 +775,7 @@ async def suggestions(payload: QueryPayload):
                 "suggestions": [],
             }
         )
+
 
 # Retrieve specific document based on UUID
 @app.post("/api/get_document")
@@ -719,6 +812,7 @@ async def get_document(payload: GetDocumentPayload):
                 "document": None,
             }
         )
+
 
 ## Retrieve and search documents imported to Weaviate
 @app.post("/api/get_all_documents")
@@ -766,7 +860,9 @@ async def get_all_documents(payload: SearchQueryPayload):
                 }
             )
 
-        elapsed_time = round(time.time() - start_time, 2)  # Calculate elapsed time
+        elapsed_time = round(
+            time.time() - start_time, 2
+        )  # Calculate elapsed time
         msg.good(
             f"Succesfully retrieved document: {len(documents)} documents in {elapsed_time}s"
         )
@@ -794,6 +890,7 @@ async def get_all_documents(payload: SearchQueryPayload):
             }
         )
 
+
 # Delete specific document based on UUID
 @app.post("/api/delete_document")
 async def delete_document(payload: GetDocumentPayload):
@@ -806,32 +903,32 @@ async def delete_document(payload: GetDocumentPayload):
     manager.delete_document_by_id(payload.document_id)
     return JSONResponse(content={})
 
-#for bitspprojs
+
+# for bitspprojs
 async def make_request(query_user):
     # Escape the query to handle special characters and newlines
     formatted_query = json.dumps(query_user)
-    
+
     # Create a payload with the formatted query
     payload = QueryPayload(query=formatted_query)
 
     # Retrieve chunks and context
     chunks, context = manager.retrieve_chunks([payload.query])
-    
-    return context
 
+    return context
 
 
 # async def grading_assistant(question_answer_pair, context):
 #     user_context = "".join(context)
 #     rubric_content = f"""Please act as an impartial judge and evaluate the quality of the provided answer which attempts to answer the provided question based on a provided context.
-#             You'll be given context, question and answer to submit your reasoning and score for the correctness, comprehensiveness and readability of the answer. 
+#             You'll be given context, question and answer to submit your reasoning and score for the correctness, comprehensiveness and readability of the answer.
 
-#             Here is the context - 
+#             Here is the context -
 #             [CONTEXT START]
-#             {user_context}. 
+#             {user_context}.
 #             [CONTEXT START]
 
-#             Below is your grading rubric: 
+#             Below is your grading rubric:
 #             - Correctness: If the answer correctly answers the question, below are the details for different scores:
 #             - Score 0: the answer is completely incorrect, doesn't mention anything about the question or is completely contrary to the correct answer.
 #                 - For example, when asked “How to terminate a databricks cluster”, the answer is an empty string, or content that's completely irrelevant, or sorry I don't know the answer.
@@ -881,7 +978,7 @@ async def make_request(query_user):
 #                     Click on the down-arrow next to the cluster name to open the cluster details.
 #                     Click on the "Terminate" button…………………………………..
 #                     A confirmation dialog will appear. Click "Terminate" again to confirm the action.
-#             - Score 3: the answer is correct and reader friendly, no obvious piece that affect readability.          
+#             - Score 3: the answer is correct and reader friendly, no obvious piece that affect readability.
 #             The format in which you should provide results-
 #                 Correctness:
 #                     -Score
@@ -893,7 +990,7 @@ async def make_request(query_user):
 #                     -Score
 #                     -Explanation of score
 #                             """
-    
+
 #     payload = {
 #         "messages": [
 #             {"role": "system", "content": rubric_content},
@@ -904,7 +1001,7 @@ async def make_request(query_user):
 #     }
 
 #     response = await asyncio.to_thread(ollama_chat, model='llama3.1', messages=payload['messages'], stream=payload['stream'])
-    
+
 #     # Define a dictionary to store extracted scores
 #     scores_dict = {}
 
@@ -975,14 +1072,14 @@ async def make_request(query_user):
 #                 -Example n: "[Quoted text from transcript]" [Description] [Timestamp]
 #             -Include both positive and negative instances.
 #             -Highlight poor examples if the score is not ideal."""
-    
+
 #     system_message = """You are a judge. The judge gives helpful, detailed, and polite suggestions for improvement for a particular teacher from the given context - the context contains transcripts of videos. The judge should also indicate when the judgment can be found in the context."""
-    
-#     formatted_transcripts = f"""Here are the transcripts for {instructor_name}-   
+
+#     formatted_transcripts = f"""Here are the transcripts for {instructor_name}-
 #                     [TRANSCRIPT START]
 #                     {user_context}
 #                     [TRANSCRIPT END]"""
-    
+
 #     user_prompt = f"""Please provide an evaluation of the teacher named '{instructor_name}' on the following criteria: '{score_criterion}'. Only include information from transcripts where '{instructor_name}' is the instructor."""
 
 #     # Define the payload
@@ -999,9 +1096,9 @@ async def make_request(query_user):
 #         ],
 #         "stream": False,
 #         "options": {
-#             "top_k": 1, 
-#             "top_p": 1, 
-#             "temperature": 0, 
+#             "top_k": 1,
+#             "top_p": 1,
+#             "temperature": 0,
 #             "seed": 100
 #         }
 #     }
@@ -1027,6 +1124,7 @@ async def make_request(query_user):
 
 #     # Return only the relevant content without any metadata
 #     return {"content": content}, scores_dict
+
 
 async def instructor_eval(transcript, context, score_criterion, explanation):
     # Ensure score_criterion is hashable by converting it to a string if necessary
@@ -1063,40 +1161,43 @@ async def instructor_eval(transcript, context, score_criterion, explanation):
         -Output Format:
             -{score_criterion}: Score(range of 1 to 5, or N/A) - note: Do not use bold or italics or any formatting in this line.
             """
-    
+
     # system_message = """You are a judge. The judge gives helpful, detailed, and polite suggestions for improvement for a particular teacher from the given context - the context contains transcripts of videos. The judge should also indicate when the judgment can be found in the context."""
-    
+
     formatted_transcripts = f"""Evaluate the following transcript based on {score_criterion}:
     Transcript -
       {transcript} """
-    
 
-    afe_new_system_prompt = (
-        f""" 
+    afe_new_system_prompt = f""" 
         {evaluate_instructions}
         """
-    )
-    afe_new_user_prompt = (
-        f"""
+    afe_new_user_prompt = f"""
         {formatted_transcripts} + "/n/n" + {output_format}
         """
-    )
     # Correct request creation
-    request_obj = QueryRequest(query=transcript)  # Adjust to the correct instantiation if necessary
-    
+    request_obj = QueryRequest(
+        query=transcript
+    )  # Adjust to the correct instantiation if necessary
+
     # Generate the response using the utility function
-    full_text = await generate_response(request_obj, context, afe_new_system_prompt, afe_new_user_prompt)
-    
+    full_text = await generate_response(
+        request_obj, context, afe_new_system_prompt, afe_new_user_prompt
+    )
+
     # Store the response
     content = full_text
 
     # Extract the score from the response content
-    pattern = rf'(?i)(score:\s*(\d+)|\**{re.escape(score_criterion)}\**\s*[:\-]?\s*(\d+))'
+    pattern = rf"(?i)(score:\s*(\d+)|\**{re.escape(score_criterion)}\**\s*[:\-]?\s*(\d+))"
     match = re.search(pattern, content, re.IGNORECASE)
 
     if match:
         # Check which group matched and extract the score
-        score_value = match.group(2).strip() if match.group(2) else match.group(3).strip()
+        score_value = (
+            match.group(2).strip()
+            if match.group(2)
+            else match.group(3).strip()
+        )
         score = score_value
     else:
         score = -1
@@ -1149,7 +1250,7 @@ async def instructor_eval(transcript, context, score_criterion, explanation):
 #         ### Example
 #         Here are a couple of examples to illustrate the format:
 #         ONE-SHOT-EXAMPLE-GOES-HERE"""
-    
+
 #     user_prompt = f"""Please answer the following question - {question}"""
 
 #     payload = {
@@ -1174,7 +1275,7 @@ async def instructor_eval(transcript, context, score_criterion, explanation):
 
 #     # Call ollama_chat function in a separate thread
 #     response = await asyncio.to_thread(ollama.chat, model='llama3.1', messages=payload['messages'], stream=payload['stream'])
-#     answer = response['message']['content']   
+#     answer = response['message']['content']
 
 #     return answer
 
@@ -1185,12 +1286,13 @@ async def instructor_eval(transcript, context, score_criterion, explanation):
 #     context = await make_request(query)
 #     if context is None:
 #         raise HTTPException(status_code=500, detail="Failed to fetch context")
-    
+
 #     answer = await answer_gen(query, context)
 #     response = {
 #         "answer": answer
 #     }
 #     return response
+
 
 # Define the endpoint
 @app.post("/api/answergen")
@@ -1199,11 +1301,11 @@ async def answergen_ollama(request: QueryRequest):
     context = await make_request(query)
     if context is None:
         raise HTTPException(status_code=500, detail="Failed to fetch context")
-    
+
     filtered_context_answergen = await context_relevance_filter(query, context)
     print("Filtered context for answergen: " + filtered_context_answergen)
     # Example custom prompts
-    answergen_system_prompt = (f"""
+    answergen_system_prompt = f"""
         ### Context:
         Ensure that each generated answer is relevant to the following context:
 
@@ -1243,19 +1345,23 @@ async def answergen_ollama(request: QueryRequest):
         ### Example
         Here are a couple of examples to illustrate the format:
         ONE-SHOT-EXAMPLE-GOES-HERE"""
-    )
     answergen_user_prompt = (
-    f"""Please answer the following question - {query}"""
+        f"""Please answer the following question - {query}"""
     )
     # Generate the response using the utility function
-    full_text = await generate_response(request, context, answergen_system_prompt, answergen_user_prompt)
-       
-    relevance_filtered_response_for_answer_generation = await response_relevance_filter_for_answer_generation(request.query, full_text)
+    full_text = await generate_response(
+        request, context, answergen_system_prompt, answergen_user_prompt
+    )
 
-    response = {
-        "answer": relevance_filtered_response_for_answer_generation
-    }    
+    relevance_filtered_response_for_answer_generation = (
+        await response_relevance_filter_for_answer_generation(
+            request.query, full_text
+        )
+    )
+
+    response = {"answer": relevance_filtered_response_for_answer_generation}
     return response
+
 
 # # we do not need this
 # async def generate_question_variants(base_question, n, context):
@@ -1268,8 +1374,8 @@ async def answergen_ollama(request: QueryRequest):
 #         ### Background:
 #         You are tasked with creating a set of unique problem scenarios based on the following context:
 
-#         **[CONTEXT START]**  
-#         {context}  
+#         **[CONTEXT START]**
+#         {context}
 #         **[CONTEXT END]**
 
 #         Your objective is to generate distinct variations of a core problem by creatively altering its numerical, conceptual, and contextual elements. Each scenario should challenge students to apply diverse problem-solving strategies and think critically about the concepts involved.
@@ -1312,46 +1418,46 @@ async def answergen_ollama(request: QueryRequest):
 #         - **Variety and Depth**: Ensure a broad spectrum of challenges to stimulate critical thinking and in-depth analysis.
 #         - **Structural Integrity**: In multi-part problems, maintain the original structure while ensuring each variant part is thoughtfully designed and distinct.
 #         - **DO NOT INCLUDE ANSWERS OR SOLUTIONS**
-                                
+
 #         ### Example 1: Single-Part Question with 3 Variants
 
 #         **Original Question:**
 #         *Question:* A sample of gas occupies 4 liters at a pressure of 2 atm and a temperature of 300 K. Calculate the number of moles of gas in the sample using the ideal gas law.
-        
+
 #         Response-
 
 #         Spanda
-#         **Variant 1**:  
+#         **Variant 1**:
 #         a. A sample of gas occupies 6 liters at a pressure of 1.5 atm and a temperature of 310 K. Calculate the number of moles of gas in the sample using the ideal gas law.
-        
+
 #         Spanda
-#         **Variant 2**:  
+#         **Variant 2**:
 #         a. A sample of gas occupies 3 liters at a pressure of 2.5 atm and a temperature of 280 K. Calculate the number of moles of gas in the sample using the ideal gas law.
-        
+
 #         Spanda
-#         **Variant 3**:  
+#         **Variant 3**:
 #         a. A sample of gas occupies 5 liters at a pressure of 1 atm and a temperature of 350 K. Calculate the number of moles of gas in the sample using the ideal gas law.
 
 #         ### Example 2: Multi-Part Question with 2 Variants
 
 #         **Original Question:**
-#         *Question:*  
-#         a. Find the roots of the quadratic equation \(x^2 - 4x + 3 = 0\).  
-#         b. Determine the coordinates of the vertex of the parabola described by the equation \(y = x^2 - 4x + 3\).  
+#         *Question:*
+#         a. Find the roots of the quadratic equation \(x^2 - 4x + 3 = 0\).
+#         b. Determine the coordinates of the vertex of the parabola described by the equation \(y = x^2 - 4x + 3\).
 #         c. Calculate the axis of symmetry for the parabola.
-        
+
 #         Response -
-        
+
 #         Spanda
-#         **Variant 1**:  
-#         a. Find the roots of the quadratic equation \(x^2 - 6x + 8 = 0\).  
-#         b. Determine the coordinates of the vertex of the parabola described by the equation \(y = x^2 - 6x + 8\).  
+#         **Variant 1**:
+#         a. Find the roots of the quadratic equation \(x^2 - 6x + 8 = 0\).
+#         b. Determine the coordinates of the vertex of the parabola described by the equation \(y = x^2 - 6x + 8\).
 #         c. Calculate the axis of symmetry for the parabola.
 
 #         Spanda
-#         **Variant 2**:  
-#         a. Find the roots of the quadratic equation \(2x^2 - 8x + 6 = 0\).  
-#         b. Determine the coordinates of the vertex of the parabola described by the equation \(y = 2x^2 - 8x + 6\).  
+#         **Variant 2**:
+#         a. Find the roots of the quadratic equation \(2x^2 - 8x + 6 = 0\).
+#         b. Determine the coordinates of the vertex of the parabola described by the equation \(y = 2x^2 - 8x + 6\).
 #         c. Calculate the axis of symmetry for the parabola.
 
 #         Utilize these guidelines to generate distinct and engaging questions based on the given context.
@@ -1375,10 +1481,10 @@ async def answergen_ollama(request: QueryRequest):
 #         ],
 #         "stream": False,
 #         "options": {
-#             "top_k": 20, 
-#             "top_p": 0.7, 
-#             "temperature": 0.7, 
-#             # "seed": 100, 
+#             "top_k": 20,
+#             "top_p": 0.7,
+#             "temperature": 0.7,
+#             # "seed": 100,
 #         }
 #     }
 #     # print("Original question" + base_question)
@@ -1394,60 +1500,70 @@ async def answergen_ollama(request: QueryRequest):
 # we need this
 def extract_variants(base_question, content):
     # Regex pattern to capture everything after "Spanda" and before the next "Spanda" or the end of the content
-    variant_pattern = re.compile(r'(Spanda.*?)(?=Spanda|\Z)', re.DOTALL)
-    
+    variant_pattern = re.compile(r"(Spanda.*?)(?=Spanda|\Z)", re.DOTALL)
+
     # Find all variants
     variants = variant_pattern.findall(content)
-    
+
     variant_contents = []
-    
+
     for variant in variants:
-        variant_contents.append(variant.strip())  # Store the content in the list and remove leading/trailing whitespace
-    
+        variant_contents.append(
+            variant.strip()
+        )  # Store the content in the list and remove leading/trailing whitespace
+
     return {base_question: variant_contents}
+
 
 @app.post("/api/assignments")
 async def get_the_assignments(request: CourseIDRequest):
     try:
-        course_id, course_name = get_course_info_by_shortname(request.course_shortname)
-        
+        course_id, course_name = get_course_info_by_shortname(
+            request.course_shortname
+        )
+
         assignments = get_assignments(course_id)
-        return JSONResponse(content={
-            "course_name": course_name,
-            "course_id": course_id,
-            "assignments": assignments
-        })
+        return JSONResponse(
+            content={
+                "course_name": course_name,
+                "course_id": course_id,
+                "assignments": assignments,
+            }
+        )
     except HTTPException as e:
-        return JSONResponse(content={"error": e.detail}, status_code=e.status_code)
+        return JSONResponse(
+            content={"error": e.detail}, status_code=e.status_code
+        )
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
-
 def get_all_courses():
     params = {
-        'wstoken': TOKEN,
-        'wsfunction': 'core_course_get_courses',
-        'moodlewsrestformat': 'json'
+        "wstoken": TOKEN,
+        "wsfunction": "core_course_get_courses",
+        "moodlewsrestformat": "json",
     }
-    return moodle_api_call(params) 
+    return moodle_api_call(params)
+
 
 # Function to get enrolled users in a specific course
 def get_enrolled_users(course_id):
     params = {
-        'wstoken': TOKEN,
-        'wsfunction': 'core_enrol_get_enrolled_users',
-        'moodlewsrestformat': 'json',
-        'courseid': course_id
+        "wstoken": TOKEN,
+        "wsfunction": "core_enrol_get_enrolled_users",
+        "moodlewsrestformat": "json",
+        "courseid": course_id,
     }
     return moodle_api_call(params)
+
 
 # Function to check admin capabilities
 def check_admin_capabilities():
     params = {
-        'wstoken': TOKEN,
-        'wsfunction': 'core_webservice_get_site_info',
-        'moodlewsrestformat': 'json',
+        "wstoken": TOKEN,
+        "wsfunction": "core_webservice_get_site_info",
+        "moodlewsrestformat": "json",
     }
     site_info = moodle_api_call(params)
     print("Site Info:", site_info)
@@ -1455,73 +1571,78 @@ def check_admin_capabilities():
 
 def get_course_info_by_shortname(course_shortname):
     params = {
-        'wstoken': TOKEN,
-        'wsfunction': 'core_course_get_courses_by_field',
-        'moodlewsrestformat': 'json',
-        'field': 'shortname',
-        'value': course_shortname
+        "wstoken": TOKEN,
+        "wsfunction": "core_course_get_courses_by_field",
+        "moodlewsrestformat": "json",
+        "field": "shortname",
+        "value": course_shortname,
     }
     result = moodle_api_call(params)
-    if result['courses']:
-        course = result['courses'][0]
-        return course['id'], course['fullname']
+    if result["courses"]:
+        course = result["courses"][0]
+        return course["id"], course["fullname"]
     else:
         raise Exception("Course not found")
-    
+
+
 # Function to get assignments for a specific course
 def get_assignments(course_id):
     params = {
-        'wstoken': TOKEN,
-        'wsfunction': 'mod_assign_get_assignments',
-        'moodlewsrestformat': 'json',
-        'courseids[0]': course_id
+        "wstoken": TOKEN,
+        "wsfunction": "mod_assign_get_assignments",
+        "moodlewsrestformat": "json",
+        "courseids[0]": course_id,
     }
-    
-    extra_params = {'includenotenrolledcourses': 1}
+
+    extra_params = {"includenotenrolledcourses": 1}
     assignments = moodle_api_call(params, extra_params)
-    
-    if not assignments.get('courses'):
+
+    if not assignments.get("courses"):
         print("No courses found.")
         return []
 
-    courses = assignments['courses']
+    courses = assignments["courses"]
     if not courses:
         print("No courses returned from API.")
         return []
 
     course_data = courses[0]
 
-    if 'assignments' not in course_data:
-        print(f"No assignments found for course: {course_data.get('fullname')}")
+    if "assignments" not in course_data:
+        print(
+            f"No assignments found for course: {course_data.get('fullname')}"
+        )
         return []
 
-    return course_data['assignments']
+    return course_data["assignments"]
+
 
 # Function to get submissions for a specific assignment
 def get_assignment_submissions(assignment_id):
     params = {
-        'wstoken': TOKEN,
-        'wsfunction': 'mod_assign_get_submissions',
-        'moodlewsrestformat': 'json',
-        'assignmentids[0]': assignment_id
+        "wstoken": TOKEN,
+        "wsfunction": "mod_assign_get_submissions",
+        "moodlewsrestformat": "json",
+        "assignmentids[0]": assignment_id,
     }
     submissions = moodle_api_call(params)
 
-    if not submissions.get('assignments'):
+    if not submissions.get("assignments"):
         return []
 
-    assignments_data = submissions.get('assignments', [])
+    assignments_data = submissions.get("assignments", [])
     if not assignments_data:
         print("No assignments data returned from API.")
         return []
 
     assignment_data = assignments_data[0]
 
-    if 'submissions' not in assignment_data:
+    if "submissions" not in assignment_data:
         print(f"No submissions found for assignment: {assignment_id}")
         return []
 
-    return assignment_data['submissions']
+    return assignment_data["submissions"]
+
 
 # Function to download a file from a given URL
 def download_file(url):
@@ -1529,7 +1650,10 @@ def download_file(url):
     if response.status_code == 200:
         return response.content
     else:
-        raise Exception(f"Failed to download file: {response.status_code}, URL: {url}")
+        raise Exception(
+            f"Failed to download file: {response.status_code}, URL: {url}"
+        )
+
 
 # Function to extract text from a PDF file
 def extract_text_from_pdf(file_content):
@@ -1542,109 +1666,147 @@ def extract_text_from_pdf(file_content):
     except Exception as e:
         return f"Error extracting text from PDF: {str(e)}"
 
+
 # Function to extract text from a DOCX file
 def extract_text_from_docx(file_content):
     with io.BytesIO(file_content) as f:
         doc = Document(f)
         return "\n".join([para.text for para in doc.paragraphs])
 
+
 # Function to extract text from a TXT file
 def extract_text_from_txt(file_content):
-    return file_content.decode('utf-8')
+    return file_content.decode("utf-8")
+
 
 # Function to extract text from an image file
 def extract_text_from_image(file_content):
     image = Image.open(io.BytesIO(file_content))
     return pytesseract.image_to_string(image)
 
+
 # Function to extract text from a submission file based on file type
 def extract_text_from_submission(file):
-    file_url = file['fileurl']
-    file_url_with_token = f"{file_url}&token={TOKEN}" if '?' in file_url else f"{file_url}?token={TOKEN}"
-    print(f"Downloading file from URL: {file_url_with_token}")  # Log the file URL
-    
+    file_url = file["fileurl"]
+    file_url_with_token = (
+        f"{file_url}&token={TOKEN}"
+        if "?" in file_url
+        else f"{file_url}?token={TOKEN}"
+    )
+    print(
+        f"Downloading file from URL: {file_url_with_token}"
+    )  # Log the file URL
+
     file_content = download_file(file_url_with_token)
-    file_name = file['filename'].lower()
+    file_name = file["filename"].lower()
     print(f"Processing file: {file_name}")  # Log the file name
 
     try:
-        if file_name.endswith('.pdf'):
+        if file_name.endswith(".pdf"):
             return extract_text_from_pdf(file_content)
-        elif file_name.endswith('.docx'):
+        elif file_name.endswith(".docx"):
             return extract_text_from_docx(file_content)
-        elif file_name.endswith('.txt'):
+        elif file_name.endswith(".txt"):
             return extract_text_from_txt(file_content)
-        elif file_name.endswith(('.png', '.jpg', '.jpeg')):
+        elif file_name.endswith((".png", ".jpg", ".jpeg")):
             return extract_text_from_image(file_content)
         else:
             return "Unsupported file format."
     except Exception as e:
         return f"Error extracting text: {str(e)}"
 
+
 # Function to extract Q&A pairs using regex
 def extract_qa_pairs(text):
-    qa_pairs = re.findall(r'(Q\d+:\s.*?\nA\d+:\s.*?(?=\nQ\d+:|\Z))', text, re.DOTALL)
+    qa_pairs = re.findall(
+        r"(Q\d+:\s.*?\nA\d+:\s.*?(?=\nQ\d+:|\Z))", text, re.DOTALL
+    )
     if not qa_pairs:
         return [text.strip()]
     return [pair.strip() for pair in qa_pairs]
 
+
 def split_qa_pair(qa_pair):
     # Define regex patterns to match question and answer
-    question_pattern = re.compile(r'Q\d+:\s(.*?)(?=\nA\d+:)', re.DOTALL)
-    answer_pattern = re.compile(r'A\d+:\s(.*)', re.DOTALL)
-    
+    question_pattern = re.compile(r"Q\d+:\s(.*?)(?=\nA\d+:)", re.DOTALL)
+    answer_pattern = re.compile(r"A\d+:\s(.*)", re.DOTALL)
+
     # Find question and answer using regex patterns
     question_match = question_pattern.search(qa_pair)
     answer_match = answer_pattern.search(qa_pair)
-    
+
     # Extract and return question and answer
     question = question_match.group(1).strip() if question_match else None
     answer = answer_match.group(1).strip() if answer_match else None
-    
+
     return question, answer
 
+
 # Function to send Q&A pair to grading endpoint and get response
-async def process_user_submissions(user, submissions_by_user, activity_type, rubric_payload, ground_truth_payload):
-    user_id = user['id']
-    user_fullname = user['fullname']
-    user_email = user['email']
+async def process_user_submissions(
+    user,
+    submissions_by_user,
+    activity_type,
+    rubric_payload,
+    ground_truth_payload,
+):
+    user_id = user["id"]
+    user_fullname = user["fullname"]
+    user_email = user["email"]
     user_submission = submissions_by_user.get(user_id)
-    
+
     if not user_submission:
         return {
             "Full Name": user_fullname,
             "User ID": user_id,
             "Email": user_email,
             "Total Score": 0,
-            "Feedback": "No submission"
+            "Feedback": "No submission",
         }
-    
+
     total_score = 0
     all_comments = []
 
-    if activity_type == 'assignment':
-        for plugin in user_submission['plugins']:
-            if plugin['type'] == 'file':
-                for filearea in plugin['fileareas']:
-                    for file in filearea['files']:
+    if activity_type == "assignment":
+        for plugin in user_submission["plugins"]:
+            if plugin["type"] == "file":
+                for filearea in plugin["fileareas"]:
+                    for file in filearea["files"]:
                         try:
-                            print(f"\nProcessing file: {file['filename']} for {user_fullname}...")
+                            print(
+                                f"\nProcessing file: {file['filename']} for {user_fullname}..."
+                            )
                             text = extract_text_from_submission(file)
                             qa_pairs = extract_qa_pairs(text)
                             print("QAPAIRS", qa_pairs)
                             for i, qa_pair in enumerate(qa_pairs):
-                                 
+
                                 try:
                                     print(qa_pair)
-                                    question_req, answer_req = split_qa_pair(qa_pair)
+                                    question_req, answer_req = split_qa_pair(
+                                        qa_pair
+                                    )
                                     print(question_req)
                                     print(answer_req)
-                                    query_request_rubric= QueryRequestWithGroundTruth(question=question_req,answer=answer_req,rubric=rubric_payload,ground_truth=ground_truth_payload)
-                                    
+                                    query_request_rubric = (
+                                        QueryRequestWithGroundTruth(
+                                            question=question_req,
+                                            answer=answer_req,
+                                            rubric=rubric_payload,
+                                            ground_truth=ground_truth_payload,
+                                        )
+                                    )
+
                                     query_request = QueryRequest(query=qa_pair)
-                                    result_feedback = await ollama_aga_with_ground_truth(query_request_rubric)
-                                   
-                                    justification = result_feedback["justification"]
+                                    result_feedback = (
+                                        await ollama_aga_with_ground_truth(
+                                            query_request_rubric
+                                        )
+                                    )
+
+                                    justification = result_feedback[
+                                        "justification"
+                                    ]
                                     # result = await ollama_aga(query_request)
                                     # avg_score = result.get("average_score")
                                     total_score += result_feedback["score"]
@@ -1652,9 +1814,13 @@ async def process_user_submissions(user, submissions_by_user, activity_type, rub
                                     all_comments.append(comment)
 
                                 except Exception as e:
-                                    print(f"  Error grading Q&A pair {i+1} for {user_fullname}: {str(e)}")
+                                    print(
+                                        f"  Error grading Q&A pair {i+1} for {user_fullname}: {str(e)}"
+                                    )
                         except Exception as e:
-                            print(f"  Error extracting text for {user_fullname}: {str(e)}")
+                            print(
+                                f"  Error extracting text for {user_fullname}: {str(e)}"
+                            )
 
     feedback = " | ".join(all_comments)
     return {
@@ -1662,103 +1828,135 @@ async def process_user_submissions(user, submissions_by_user, activity_type, rub
         "User ID": user_id,
         "Email": user_email,
         "Total Score": total_score,
-        "Feedback": feedback
+        "Feedback": feedback,
     }
+
 
 # Function to get course details by ID
 def get_course_by_id(course_id):
     params = {
-        'wstoken': TOKEN,
-        'wsfunction': 'core_course_get_courses',
-        'moodlewsrestformat': 'json',
-        'options[ids][0]': course_id
+        "wstoken": TOKEN,
+        "wsfunction": "core_course_get_courses",
+        "moodlewsrestformat": "json",
+        "options[ids][0]": course_id,
     }
     return moodle_api_call(params)
+
 
 # Function to write data to a CSV file in Moodle-compatible format
 def write_to_csv(data, course_id, assignment_name):
     filename = f"Course_{course_id}_{assignment_name.replace(' ', '_')}_autograded.csv"
-    with open(filename, mode='w', newline='', encoding='utf-8') as file:
+    with open(filename, mode="w", newline="", encoding="utf-8") as file:
         writer = csv.writer(file)
-        print("FILENAME",filename)
-        writer.writerow(["Full Name", "User ID", "Email", "Total Score", "Feedback"])
-        print("DATA",data,course_id,assignment_name)
+        print("FILENAME", filename)
+        writer.writerow(
+            ["Full Name", "User ID", "Email", "Total Score", "Feedback"]
+        )
+        print("DATA", data, course_id, assignment_name)
         for row in data:
-            writer.writerow([row["Full Name"], row["User ID"], row["Email"], row["Total Score"], row["Feedback"]])
+            writer.writerow(
+                [
+                    row["Full Name"],
+                    row["User ID"],
+                    row["Email"],
+                    row["Total Score"],
+                    row["Feedback"],
+                ]
+            )
 
-async def process_user_submissions2(user, submissions_by_user, activity_type, token):
-    user_id = user['id']
-    user_fullname = user['fullname']
-    user_email = user['email']
+
+async def process_user_submissions2(
+    user, submissions_by_user, activity_type, token
+):
+    user_id = user["id"]
+    user_fullname = user["fullname"]
+    user_email = user["email"]
     user_submission = submissions_by_user.get(user_id)
-    
+
     if not user_submission:
         return {
             "Full Name": user_fullname,
             "User ID": user_id,
             "Email": user_email,
             "Total Score": 0,
-            "Feedback": "No submission"
+            "Feedback": "No submission",
         }
-    
+
     total_score = 0
     all_comments = []
 
-    if activity_type == 'assignment':
-        for plugin in user_submission['plugins']:
-            if plugin['type'] == 'file':
-                for filearea in plugin['fileareas']:
-                    for file in filearea['files']:
+    if activity_type == "assignment":
+        for plugin in user_submission["plugins"]:
+            if plugin["type"] == "file":
+                for filearea in plugin["fileareas"]:
+                    for file in filearea["files"]:
                         try:
-                            print(f"\nProcessing file: {file['filename']} for {user_fullname}...")
+                            print(
+                                f"\nProcessing file: {file['filename']} for {user_fullname}..."
+                            )
                             text = extract_text_from_submission(file)
                             qa_pairs = extract_qa_pairs(text)
                             print("QAPAIRS", qa_pairs)
                             for i, qa_pair in enumerate(qa_pairs):
                                 try:
                                     # Ensure qa_pair is a string
-                                    query_request = QueryRequest(query=qa_pair)  # Remove the list brackets
-                                    result = await ollama_aga2(query_request, token)
+                                    query_request = QueryRequest(
+                                        query=qa_pair
+                                    )  # Remove the list brackets
+                                    result = await ollama_aga2(
+                                        query_request, token
+                                    )
                                     justification = result.get("justification")
                                     avg_score = result.get("average_score")
                                     total_score += avg_score
                                     comment = f"Q{i+1}: {justification}"
                                     all_comments.append(comment)
 
-                                    print(f"  Graded Q{i+1}: Avg. Score = {avg_score:.2f} - {justification}")
+                                    print(
+                                        f"  Graded Q{i+1}: Avg. Score = {avg_score:.2f} - {justification}"
+                                    )
                                 except Exception as e:
-                                    print(f"  Error grading Q&A pair {i+1} for {user['fullname']}: {str(e)}")
+                                    print(
+                                        f"  Error grading Q&A pair {i+1} for {user['fullname']}: {str(e)}"
+                                    )
                         except Exception as e:
-                            print(f"  Error extracting text for {user_fullname}: {str(e)}")
+                            print(
+                                f"  Error extracting text for {user_fullname}: {str(e)}"
+                            )
         feedback = " | ".join(all_comments)
     return {
         "Full Name": user_fullname,
         "User ID": user_id,
         "Email": user_email,
         "Total Score": total_score,
-        "Feedback": feedback
+        "Feedback": feedback,
     }
 
 
 # Function to update a user's grade in Moodle
 def update_grade(user_id, assignment_id, grade, feedback):
     params = {
-        'wstoken': TOKEN,
-        'wsfunction': 'mod_assign_save_grade',
-        'moodlewsrestformat': 'json',
-        'assignmentid': assignment_id,
-        'userid': user_id,
-        'grade': grade, 
-        'feedback': feedback
+        "wstoken": TOKEN,
+        "wsfunction": "mod_assign_save_grade",
+        "moodlewsrestformat": "json",
+        "assignmentid": assignment_id,
+        "userid": user_id,
+        "grade": grade,
+        "feedback": feedback,
     }
     response = moodle_api_call(params)
     print(f"Grade updated for User ID: {user_id}, Status: {response}")
 
+
 # Main function to integrate with Moodle
-async def moodle_integration_pipeline(course_shortname, assignment_name, activity_type, rubric, ground_truth):
+async def moodle_integration_pipeline(
+    course_shortname, assignment_name, activity_type, rubric, ground_truth
+):
     try:
 
-        print(f"\n=== Fetching Course Details for Shortname: {course_shortname} ===")
+        print(
+            f"\n=== Fetching Course Details for Shortname: {course_shortname} ==="
+        )
         course_id, course_name = get_course_info_by_shortname(course_shortname)
         print(f"Course ID: {course_id}, Course Name: {course_name}")
         # Fetching course details
@@ -1766,7 +1964,7 @@ async def moodle_integration_pipeline(course_shortname, assignment_name, activit
         course_details = get_course_by_id(course_id)
         if not course_details:
             raise Exception("Course not found.")
-        course_name = course_details[0]['fullname']
+        course_name = course_details[0]["fullname"]
         print(f"Course Name: {course_name}")
 
         # Fetching enrolled users
@@ -1774,7 +1972,7 @@ async def moodle_integration_pipeline(course_shortname, assignment_name, activit
         users = get_enrolled_users(course_id)
         print(f"Found {len(users)} enrolled users.")
 
-        if activity_type == 'assignment':
+        if activity_type == "assignment":
             # Fetching assignments
             print("\n=== Fetching Assignments ===")
             activities = get_assignments(course_id)
@@ -1784,12 +1982,21 @@ async def moodle_integration_pipeline(course_shortname, assignment_name, activit
         print(f"Found {len(activities)} {activity_type}s.")
 
         # Matching the activity by name
-        activity = next((a for a in activities if a['name'].strip().lower() == assignment_name.strip().lower()), None)
+        activity = next(
+            (
+                a
+                for a in activities
+                if a["name"].strip().lower() == assignment_name.strip().lower()
+            ),
+            None,
+        )
         if not activity:
             raise Exception(f"{activity_type.capitalize()} not found.")
 
-        activity_id = activity['id']
-        print(f"{activity_type.capitalize()} '{assignment_name}' found with ID: {activity_id}")
+        activity_id = activity["id"]
+        print(
+            f"{activity_type.capitalize()} '{assignment_name}' found with ID: {activity_id}"
+        )
 
         # Fetching submissions for the assignment
         print("\n=== Fetching Submissions ===")
@@ -1797,11 +2004,16 @@ async def moodle_integration_pipeline(course_shortname, assignment_name, activit
 
         print(f"Found {len(submissions)} submissions.")
 
-        submissions_by_user = {s['userid']: s for s in submissions}
+        submissions_by_user = {s["userid"]: s for s in submissions}
 
         # Processing submissions
         print("\n=== Processing Submissions ===")
-        tasks = [process_user_submissions(user, submissions_by_user, activity_type, rubric, ground_truth) for user in users]
+        tasks = [
+            process_user_submissions(
+                user, submissions_by_user, activity_type, rubric, ground_truth
+            )
+            for user in users
+        ]
         processed_data = await asyncio.gather(*tasks)
 
         # Writing data to CSV
@@ -1815,10 +2027,15 @@ async def moodle_integration_pipeline(course_shortname, assignment_name, activit
         print(f"\nAn error occurred: {str(e)}")
         raise
 
+
 # Main function to integrate with Moodle
-async def moodle_integration_pipeline2(course_shortname: str, assignment_name: str, activity_type: str, token: str):
+async def moodle_integration_pipeline2(
+    course_shortname: str, assignment_name: str, activity_type: str, token: str
+):
     try:
-        print(f"\n=== Fetching Course Details for Shortname: {course_shortname} ===")
+        print(
+            f"\n=== Fetching Course Details for Shortname: {course_shortname} ==="
+        )
         course_id, course_name = get_course_info_by_shortname(course_shortname)
         print(f"Course ID: {course_id}, Course Name: {course_name}")
 
@@ -1827,7 +2044,7 @@ async def moodle_integration_pipeline2(course_shortname: str, assignment_name: s
         course_details = get_course_by_id(course_id)
         if not course_details:
             raise Exception("Course not found.")
-        course_name = course_details[0]['fullname']
+        course_name = course_details[0]["fullname"]
         print(f"Course Name: {course_name}")
 
         # Fetching enrolled users
@@ -1835,7 +2052,7 @@ async def moodle_integration_pipeline2(course_shortname: str, assignment_name: s
         users = get_enrolled_users(course_id)
         print(f"Found {len(users)} enrolled users.")
 
-        if activity_type == 'assignment':
+        if activity_type == "assignment":
             # Fetching assignments
             print("\n=== Fetching Assignments ===")
             activities = get_assignments(course_id)
@@ -1845,12 +2062,21 @@ async def moodle_integration_pipeline2(course_shortname: str, assignment_name: s
         print(f"Found {len(activities)} {activity_type}s.")
 
         # Matching the activity by name
-        activity = next((a for a in activities if a['name'].strip().lower() == assignment_name.strip().lower()), None)
+        activity = next(
+            (
+                a
+                for a in activities
+                if a["name"].strip().lower() == assignment_name.strip().lower()
+            ),
+            None,
+        )
         if not activity:
             raise Exception(f"{activity_type.capitalize()} not found.")
 
-        activity_id = activity['id']
-        print(f"{activity_type.capitalize()} '{assignment_name}' found with ID: {activity_id}")
+        activity_id = activity["id"]
+        print(
+            f"{activity_type.capitalize()} '{assignment_name}' found with ID: {activity_id}"
+        )
 
         # Fetching submissions for the assignment
         print("\n=== Fetching Submissions ===")
@@ -1858,13 +2084,18 @@ async def moodle_integration_pipeline2(course_shortname: str, assignment_name: s
 
         print(f"Found {len(submissions)} submissions.")
 
-        submissions_by_user = {s['userid']: s for s in submissions}
+        submissions_by_user = {s["userid"]: s for s in submissions}
 
         # Processing submissions
         print("\n=== Processing Submissions ===")
-        tasks = [process_user_submissions2(user, submissions_by_user, activity_type, token) for user in users]
+        tasks = [
+            process_user_submissions2(
+                user, submissions_by_user, activity_type, token
+            )
+            for user in users
+        ]
         processed_data = await asyncio.gather(*tasks)
-        print("PROCESSED DATA",processed_data)
+        print("PROCESSED DATA", processed_data)
         # Writing data to CSV
         print("\n=== Writing Data to CSV ===")
         write_to_csv(processed_data, course_id, assignment_name)
@@ -1875,26 +2106,45 @@ async def moodle_integration_pipeline2(course_shortname: str, assignment_name: s
     except Exception as e:
         print(f"\nAn error occurred: {str(e)}")
         raise
+
+
 # Main function to integrate with Moodle
 
 
 @app.post("/api/process")
 async def grade_assignment(request: RequestAGA):
-    
+
     course_shortname = request.course_shortname
     assignment_name = request.assignment_name
     activity_type = "assignment"
-    rubric=request.rubric
-    ground_truth=request.ground_truth 
+    rubric = request.rubric
+    ground_truth = request.ground_truth
 
     try:
-        processed_data = await moodle_integration_pipeline(course_shortname, assignment_name, activity_type, rubric, ground_truth)
-        return JSONResponse(content={"status": "success", "message": "Grading completed successfully", "data": processed_data})
+        processed_data = await moodle_integration_pipeline(
+            course_shortname,
+            assignment_name,
+            activity_type,
+            rubric,
+            ground_truth,
+        )
+        return JSONResponse(
+            content={
+                "status": "success",
+                "message": "Grading completed successfully",
+                "data": processed_data,
+            }
+        )
     except Exception as e:
-        return JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
+        return JSONResponse(
+            content={"status": "error", "message": str(e)}, status_code=500
+        )
+
 
 @app.post("/api/process2")
-async def grade_assignment(request: RequestAGA, token: str = Depends(oauth2_scheme)):
+async def grade_assignment(
+    request: RequestAGA, token: str = Depends(oauth2_scheme)
+):
     # Extract data from request
     # data = await request.json()
     course_shortname = request.course_shortname
@@ -1903,36 +2153,45 @@ async def grade_assignment(request: RequestAGA, token: str = Depends(oauth2_sche
 
     try:
         # Call moodle_integration_pipeline with token
-        processed_data = await moodle_integration_pipeline2(course_shortname, assignment_name, activity_type, token)
-        return JSONResponse(content={"status": "success", "message": "Grading completed successfully", "data": processed_data})
+        processed_data = await moodle_integration_pipeline2(
+            course_shortname, assignment_name, activity_type, token
+        )
+        return JSONResponse(
+            content={
+                "status": "success",
+                "message": "Grading completed successfully",
+                "data": processed_data,
+            }
+        )
     except Exception as e:
-        return JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
+        return JSONResponse(
+            content={"status": "error", "message": str(e)}, status_code=500
+        )
 
 
 @app.post("/api/ollamaAGA_with_ground_truth")
 async def ollama_aga_with_ground_truth(request: QueryRequestWithGroundTruth):
 
-    print("tttttttttttttt",request.question)
-    print("pppppppppppppp",request.answer)
+    print("tttttttttttttt", request.question)
+    print("pppppppppppppp", request.answer)
     if request.ground_truth == "":
         request.ground_truth = await make_request(request.question)
         print("stage 1")
         print(request.ground_truth)
-        request.ground_truth = await context_relevance_filter(request.question, request.ground_truth)
-        print("stage 2")        
+        request.ground_truth = await context_relevance_filter(
+            request.question, request.ground_truth
+        )
+        print("stage 2")
         print(request.ground_truth)
 
     if request.rubric == None:
         request.rubric = request.default_rubric
     # TO;DO - Need to verify if constraing context to just the ground truth peanalizes the student unnecessarily.
 
-    aga_with_ground_truth_system_prompt = (
-        f"""Please act as an impartial judge and evaluate the quality of the provided answer which attempts to answer the provided question based on the provided rubric for evaluation.
+    aga_with_ground_truth_system_prompt = f"""Please act as an impartial judge and evaluate the quality of the provided answer which attempts to answer the provided question based on the provided rubric for evaluation.
             You'll be given rubric, question and answer to submit your reasoning and score. If ground truth is not provided, use your intrinsic knowledge to grade the answer.
         """
-    )
-    aga_with_ground_truth_user_prompt = (
-    f"""
+    aga_with_ground_truth_user_prompt = f"""
     Given this question -
     Question: {request.question}
 
@@ -1951,15 +2210,25 @@ async def ollama_aga_with_ground_truth(request: QueryRequestWithGroundTruth):
     Please provide the final score according to the rubric in the following format:
 
     spanda_final_score = <score>"""
-    )
 
     print("OVERALL PROMPT FOR LLM")
-    print(aga_with_ground_truth_system_prompt + aga_with_ground_truth_user_prompt)
+    print(
+        aga_with_ground_truth_system_prompt + aga_with_ground_truth_user_prompt
+    )
 
-    structure_for_generate_query = QueryRequest(query = request.answer)
-    graded_response = await generate_response(structure_for_generate_query, request.ground_truth, aga_with_ground_truth_system_prompt, aga_with_ground_truth_user_prompt)
+    structure_for_generate_query = QueryRequest(query=request.answer)
+    graded_response = await generate_response(
+        structure_for_generate_query,
+        request.ground_truth,
+        aga_with_ground_truth_system_prompt,
+        aga_with_ground_truth_user_prompt,
+    )
 
-    relevance_filtered_response_for_aga_with_ground_truth = await response_relevance_filter_for_grading_assistant(request.question, request.answer, graded_response)   
+    relevance_filtered_response_for_aga_with_ground_truth = (
+        await response_relevance_filter_for_grading_assistant(
+            request.question, request.answer, graded_response
+        )
+    )
     final_score = None
     # Regex pattern to match the score
     pattern = r"spanda_final_score\s*=\s*(\d+)"
@@ -1975,14 +2244,13 @@ async def ollama_aga_with_ground_truth(request: QueryRequestWithGroundTruth):
 
     response = {
         "justification": relevance_filtered_response_for_aga_with_ground_truth,
-        "score": final_score
-    }    
+        "score": final_score,
+    }
     return response
     # return relevance_filtered_response_for_aga_with_ground_truth
     # return graded_response
 
 
-    
 @app.post("/api/ollamaAGA")
 async def ollama_aga(request: QueryRequest):
     # Extract context
@@ -1993,10 +2261,7 @@ async def ollama_aga(request: QueryRequest):
 
     # filtered_context_aga = await context_relevance_filter(request.query, context)
 
-    
-
-    aga_system_prompt = (
-        f"""Please act as an impartial judge and evaluate the quality of the provided answer which attempts to answer the provided question based on a provided context.
+    aga_system_prompt = f"""Please act as an impartial judge and evaluate the quality of the provided answer which attempts to answer the provided question based on a provided context.
             You'll be given context, question and answer to submit your reasoning and score for the correctness, comprehensiveness and readability of the answer. 
 
             Below is your grading rubric: 
@@ -2061,14 +2326,12 @@ async def ollama_aga(request: QueryRequest):
                     -Score
                     -Explanation of score
                             """
-    )
-    aga_user_prompt = (
-    f"""Grade the following question-answer pair using the grading rubric and context provided - {request.query}"""
-    )
+    aga_user_prompt = f"""Grade the following question-answer pair using the grading rubric and context provided - {request.query}"""
     # Generate the response using the utility function
     print(request.query)
-    full_text = await generate_response(request, context, aga_system_prompt, aga_user_prompt)
-
+    full_text = await generate_response(
+        request, context, aga_system_prompt, aga_user_prompt
+    )
 
     # Extract the response content
     response_content = full_text
@@ -2081,7 +2344,9 @@ async def ollama_aga(request: QueryRequest):
 
     for criterion in criteria:
         # Use regular expression to search for the criterion followed by 'Score:'
-        criterion_pattern = re.compile(rf'{criterion}:\s*\**\s*Score\s*(\d+)', re.IGNORECASE)
+        criterion_pattern = re.compile(
+            rf"{criterion}:\s*\**\s*Score\s*(\d+)", re.IGNORECASE
+        )
         match = criterion_pattern.search(response_content)
         if match:
             # Extract the score value
@@ -2091,36 +2356,36 @@ async def ollama_aga(request: QueryRequest):
     # Calculate the average score if we have scores
     avg_score = sum(scores) / len(scores) if scores else 0
 
-    response = {
-        "justification": full_text,
-        "average_score": avg_score
-    }    
+    response = {"justification": full_text, "average_score": avg_score}
     return response
+
 
 # @app.post("/api/ollamaAGA")
 # async def ollama_aga(request: QueryRequest):
 #     context = await make_request(request.query)
 #     if context is None:
 #         raise Exception("Failed to fetch context")
-    
+
 #     variants, avg_score = await grading_assistant(request.query, context)
-    
+
 #     response = {
 #         "justification": variants,
 #         "average_score": avg_score
 #     }
-    
+
 #     return response
 
+
 @app.post("/api/ollamaAGA2")
-async def ollama_aga2(request: QueryRequest, current_user: TokenData = Depends(get_current_user)):
+async def ollama_aga2(
+    request: QueryRequest, current_user: TokenData = Depends(get_current_user)
+):
     # Extract context
     context = await make_request(request.query)
     if context is None:
         raise HTTPException(status_code=500, detail="Failed to fetch context")
     # Example custom prompts
-    aga_system_prompt = (
-        f"""Please act as an impartial judge and evaluate the quality of the provided answer which attempts to answer the provided question based on a provided context.
+    aga_system_prompt = f"""Please act as an impartial judge and evaluate the quality of the provided answer which attempts to answer the provided question based on a provided context.
             You'll be given context, question and answer to submit your reasoning and score for the correctness, comprehensiveness and readability of the answer. 
 
             Below is your grading rubric: 
@@ -2185,14 +2450,13 @@ async def ollama_aga2(request: QueryRequest, current_user: TokenData = Depends(g
                     -Score
                     -Explanation of score
                             """
-    )
-    aga_user_prompt = (
-    f"""Grade the following question-answer pair using the grading rubric and context provided - {request.query}"""
-    )
+    aga_user_prompt = f"""Grade the following question-answer pair using the grading rubric and context provided - {request.query}"""
     # Generate the response using the utility function
     print(request.query)
-    full_text = await generate_response(request, context, aga_system_prompt, aga_user_prompt)
-        
+    full_text = await generate_response(
+        request, context, aga_system_prompt, aga_user_prompt
+    )
+
     # Extract the response content
     response_content = full_text
 
@@ -2204,7 +2468,9 @@ async def ollama_aga2(request: QueryRequest, current_user: TokenData = Depends(g
 
     for criterion in criteria:
         # Use regular expression to search for the criterion followed by 'Score:'
-        criterion_pattern = re.compile(rf'{criterion}:\s*\**\s*Score\s*(\d+)', re.IGNORECASE)
+        criterion_pattern = re.compile(
+            rf"{criterion}:\s*\**\s*Score\s*(\d+)", re.IGNORECASE
+        )
         match = criterion_pattern.search(response_content)
         if match:
             # Extract the score value
@@ -2214,10 +2480,7 @@ async def ollama_aga2(request: QueryRequest, current_user: TokenData = Depends(g
     # Calculate the average score if we have scores
     avg_score = sum(scores) / len(scores) if scores else 0
 
-    response = {
-        "justification": full_text,
-        "average_score": avg_score
-    }    
+    response = {"justification": full_text, "average_score": avg_score}
     return response
 
 
@@ -2229,15 +2492,16 @@ async def ollama_aqg(request: QueryRequestaqg):
     context = await make_request(request.query)
     if context is None:
         raise HTTPException(status_code=500, detail="Failed to fetch context")
-    
-    filtered_aqg_context = await context_relevance_filter(request.query, context)
+
+    filtered_aqg_context = await context_relevance_filter(
+        request.query, context
+    )
     print("FIltered AQG context: ")
     print(filtered_aqg_context)
     # print("FILTERED AQG CONTEXT:")
     # print(context)
     # Example custom prompts
-    aqg_system_prompt = (
-        f"""
+    aqg_system_prompt = f"""
         **Task: Design a Variety of Mathematical and Conceptual Problem Scenarios**
 
         ### Background:
@@ -2331,24 +2595,19 @@ async def ollama_aqg(request: QueryRequestaqg):
 
         Utilize these guidelines to generate distinct and engaging questions based on the given context.
     """
-    )
-    aqg_user_prompt = (
-        f"""Please generate {n} variants of the question: '{query}'.
+    aqg_user_prompt = f"""Please generate {n} variants of the question: '{query}'.
 
             In multi-part problems, maintain the original structure while ensuring each variant part is thoughtfully designed and distinct. Type 'Spanda' before the beggining of every variant. Make sure to add 'Spanda' before every variant, its important.
             Please change the numbers wherever possible.
         """
-    )
     # Generate the response using the utility function
-    full_text = await generate_response(request, context, aqg_system_prompt, aqg_user_prompt)
+    full_text = await generate_response(
+        request, context, aqg_system_prompt, aqg_user_prompt
+    )
     # relevance_filtered_response_for_question_generation = await response_relevance_filter_for_question_generation(request.query, full_text)
     variants_dict = extract_variants(query, full_text)
-    response = {
-        "variants": full_text,
-        "variants_dict": variants_dict
-    }
+    response = {"variants": full_text, "variants_dict": variants_dict}
     return response
-
 
 
 # @app.post("/api/ollamaAQG")
@@ -2364,9 +2623,11 @@ async def ollama_aqg(request: QueryRequestaqg):
 #     return response
 
 
-
 @app.post("/api/ollamaAQG2")
-async def ollama_aqg(request: QueryRequestaqg, current_user: TokenData = Depends(get_current_user)):
+async def ollama_aqg(
+    request: QueryRequestaqg,
+    current_user: TokenData = Depends(get_current_user),
+):
     query = request.query
     n = request.NumberOfVariants
     # Extract context
@@ -2374,8 +2635,7 @@ async def ollama_aqg(request: QueryRequestaqg, current_user: TokenData = Depends
     if context is None:
         raise HTTPException(status_code=500, detail="Failed to fetch context")
     # Example custom prompts
-    aqg_system_prompt = (
-        f"""
+    aqg_system_prompt = f"""
         **Task: Design a Variety of Mathematical and Conceptual Problem Scenarios**
 
         ### Background:
@@ -2469,39 +2729,37 @@ async def ollama_aqg(request: QueryRequestaqg, current_user: TokenData = Depends
 
         Utilize these guidelines to generate distinct and engaging questions based on the given context.
     """
-    )
-    aqg_user_prompt = (
-        f"""Please generate {n} variants of the question: '{query}'.
+    aqg_user_prompt = f"""Please generate {n} variants of the question: '{query}'.
 
             In multi-part problems, maintain the original structure while ensuring each variant part is thoughtfully designed and distinct. Type 'Spanda' before the beggining of every variant. Make sure to add 'Spanda' before every variant, its important.
         """
-    )
     # Generate the response using the utility function
-    full_text = await generate_response(request, context, aqg_system_prompt, aqg_user_prompt)
+    full_text = await generate_response(
+        request, context, aqg_system_prompt, aqg_user_prompt
+    )
     variants_dict = extract_variants(query, full_text)
-    response = {
-        "variants": full_text,
-        "variants_dict": variants_dict
-    }
+    response = {"variants": full_text, "variants_dict": variants_dict}
     return response
 
 
-async def generate_response(request: QueryRequest, 
-                            context: str, 
-                            custom_system_prompt: str, 
-                            custom_user_prompt: str) -> str:
+async def generate_response(
+    request: QueryRequest,
+    context: str,
+    custom_system_prompt: str,
+    custom_user_prompt: str,
+) -> str:
     # Initialize the generator
     generator = OllamaGenerator()
-    
+
     conversation = {}  # Replace with actual conversation data if available
     full_text = ""
     # Pass the custom prompts to generate_stream
     async for chunk in generator.generate_stream(
-        [request.query], 
-        [context], 
+        [request.query],
+        [context],
         conversation,
         system_prompt=custom_system_prompt,  # Custom system prompt
-        user_prompt=custom_user_prompt  # Custom user prompt
+        user_prompt=custom_user_prompt,  # Custom user prompt
     ):
         full_text += chunk["message"]
         if chunk["finish_reason"] == "stop":
@@ -2521,35 +2779,32 @@ async def spanda_chat(request: QueryRequest):
     # print("The context is -" + str(type(context)))
     filtered_context = await context_relevance_filter(request.query, context)
     # Example custom prompts
-    chatbot_system_prompt = (
-        """You are an academic assistant chatbot. Your role is to answer questions based solely on the given content. 
+    chatbot_system_prompt = """You are an academic assistant chatbot. Your role is to answer questions based solely on the given content. 
         If a question is outside the provided content, politely inform the user that the given query is outside the provided content but provide an answer based on intrinsic knowledge.
         If someone asks about the chatbot or greets you, explain that you are an assistant designed to help users by answering academic and course-oriented questions. Do not mention irrelevant content."""
-    )
     # chatbot_system_prompt = (
     #     """You are an AI responsible for assessing whether the provided content is relevant to a specific query. Carefully analyze the content and determine if it directly addresses or provides pertinent information related to the query. Only respond with "YES" if the content is relevant, or "NO" if it is not. Do not provide any explanations, scores, or additional text—just a single word: "YES" or "NO"."""
     # )
     print("FILTERED CONTEXT: " + filtered_context)
-    chatbot_user_prompt = (
-        f"""
+    chatbot_user_prompt = f"""
         Content: {filtered_context}
 
         Query: {request.query}
         """
-    )
     response_preamble = ""
     if filtered_context == " ":
         response_preamble = "There is no specific information provided about this topic, but I can answer with my intrinsic knowledge as follows: "
     # Generate the response using the utility function
-    full_text = await generate_response(request, filtered_context, chatbot_system_prompt, chatbot_user_prompt)
+    full_text = await generate_response(
+        request, filtered_context, chatbot_system_prompt, chatbot_user_prompt
+    )
 
-    relevance_filtered_response = await response_relevance_filter_for_chatbot(request.query, full_text)
+    relevance_filtered_response = await response_relevance_filter_for_chatbot(
+        request.query, full_text
+    )
 
-    response = {
-        "answer": response_preamble + relevance_filtered_response
-    }    
+    response = {"answer": response_preamble + relevance_filtered_response}
     return response
-
 
 
 ##################################################################################################################################################################
@@ -2557,99 +2812,112 @@ async def spanda_chat(request: QueryRequest):
 #################################################################################################################################################################
 # Helper methods for post-generation filtering
 
-async def response_relevance_filter_for_chatbot(query: str, response: str) -> str:
-    evaluate_system_prompt = (
-        """You are given a query and a response. Determine if the response is relevant, irrelevant or highly irrelevant to the query. Only respond with "Relevant", "Irrelevant" or "Highly Irrelevant"."""
-    )
-    evaluate_user_prompt = (
-        f"""
+
+async def response_relevance_filter_for_chatbot(
+    query: str, response: str
+) -> str:
+    evaluate_system_prompt = """You are given a query and a response. Determine if the response is relevant, irrelevant or highly irrelevant to the query. Only respond with "Relevant", "Irrelevant" or "Highly Irrelevant"."""
+    evaluate_user_prompt = f"""
         Query: {query}
 
         Content: {response}
         """
-    )
     request = QueryRequest(query=query)
-    is_response_relevant = await generate_response(request, response, evaluate_system_prompt, evaluate_user_prompt)
+    is_response_relevant = await generate_response(
+        request, response, evaluate_system_prompt, evaluate_user_prompt
+    )
     print("RELEVANCE OUTCOME")
     print(is_response_relevant)
-    if is_response_relevant.lower() == 'highly irrelevant':
-        return "Given that the answer that I am able to retrieve with the information I have seems to be highly irrelevant to the query, I abstain from providing a response. I am sorry for not being helpful." # Returns an empty coroutine
-    elif is_response_relevant.lower() == 'irrelevant':
-        return "The answer I am able to retrieve with the information I have seems to be irrelevant to the query. Nevertheless, I will provide you with the response in the hope that it will be valuable. Apologies in advance if it turns out to be of no value: " + response
+    if is_response_relevant.lower() == "highly irrelevant":
+        return "Given that the answer that I am able to retrieve with the information I have seems to be highly irrelevant to the query, I abstain from providing a response. I am sorry for not being helpful."  # Returns an empty coroutine
+    elif is_response_relevant.lower() == "irrelevant":
+        return (
+            "The answer I am able to retrieve with the information I have seems to be irrelevant to the query. Nevertheless, I will provide you with the response in the hope that it will be valuable. Apologies in advance if it turns out to be of no value: "
+            + response
+        )
     return response
 
 
-async def response_relevance_filter_for_question_generation(query: str, response: str) -> str:
-    evaluate_system_prompt = (
-        """You are given a query and a response. Determine if the response is relevant, irrelevant or highly irrelevant to the query. Only respond with "Relevant", "Irrelevant" or "Highly Irrelevant"."""
-    )
-    evaluate_user_prompt = (
-        f"""
+async def response_relevance_filter_for_question_generation(
+    query: str, response: str
+) -> str:
+    evaluate_system_prompt = """You are given a query and a response. Determine if the response is relevant, irrelevant or highly irrelevant to the query. Only respond with "Relevant", "Irrelevant" or "Highly Irrelevant"."""
+    evaluate_user_prompt = f"""
         Query: {query}
 
         Content: {response}
         """
-    )
     request = QueryRequest(query=query)
-    is_response_relevant = await generate_response(request, response, evaluate_system_prompt, evaluate_user_prompt)
+    is_response_relevant = await generate_response(
+        request, response, evaluate_system_prompt, evaluate_user_prompt
+    )
     print("RELEVANCE OUTCOME")
     print(is_response_relevant)
-    if is_response_relevant.lower() == 'highly irrelevant':
-        return "Given that the answer that I am able to retrieve with the information I have seems to be highly irrelevant to the query, I abstain from providing a response. I am sorry for not being helpful." # Returns an empty coroutine
-    elif is_response_relevant.lower() == 'irrelevant':
-        return "The answer I am able to retrieve with the information I have seems to be irrelevant to the query. Nevertheless, I will provide you with the response in the hope that it will be valuable. Apologies in advance if it turns out to be of no value: " + response
+    if is_response_relevant.lower() == "highly irrelevant":
+        return "Given that the answer that I am able to retrieve with the information I have seems to be highly irrelevant to the query, I abstain from providing a response. I am sorry for not being helpful."  # Returns an empty coroutine
+    elif is_response_relevant.lower() == "irrelevant":
+        return (
+            "The answer I am able to retrieve with the information I have seems to be irrelevant to the query. Nevertheless, I will provide you with the response in the hope that it will be valuable. Apologies in advance if it turns out to be of no value: "
+            + response
+        )
     return response
 
-async def response_relevance_filter_for_answer_generation(query: str, response: str) -> str:
-    evaluate_system_prompt = (
-        """You are given a query and a response. Determine if the response is relevant, irrelevant or highly irrelevant to the query. Only respond with "Relevant", "Irrelevant" or "Highly Irrelevant"."""
-    )
-    evaluate_user_prompt = (
-        f"""
+
+async def response_relevance_filter_for_answer_generation(
+    query: str, response: str
+) -> str:
+    evaluate_system_prompt = """You are given a query and a response. Determine if the response is relevant, irrelevant or highly irrelevant to the query. Only respond with "Relevant", "Irrelevant" or "Highly Irrelevant"."""
+    evaluate_user_prompt = f"""
         Query: {query}
 
         Content: {response}
         """
-    )
     request = QueryRequest(query=query)
-    is_response_relevant = await generate_response(request, response, evaluate_system_prompt, evaluate_user_prompt)
+    is_response_relevant = await generate_response(
+        request, response, evaluate_system_prompt, evaluate_user_prompt
+    )
     print("RELEVANCE OUTCOME")
     print(is_response_relevant)
-    if is_response_relevant.lower() == 'highly irrelevant':
-        return "Given that the answer that I am able to retrieve with the information I have seems to be highly irrelevant to the query, I abstain from providing a response. I am sorry for not being helpful." # Returns an empty coroutine
-    elif is_response_relevant.lower() == 'irrelevant':
-        return "The answer I am able to retrieve with the information I have seems to be irrelevant to the query. Nevertheless, I will provide you with the response in the hope that it will be valuable. Apologies in advance if it turns out to be of no value: " + response
+    if is_response_relevant.lower() == "highly irrelevant":
+        return "Given that the answer that I am able to retrieve with the information I have seems to be highly irrelevant to the query, I abstain from providing a response. I am sorry for not being helpful."  # Returns an empty coroutine
+    elif is_response_relevant.lower() == "irrelevant":
+        return (
+            "The answer I am able to retrieve with the information I have seems to be irrelevant to the query. Nevertheless, I will provide you with the response in the hope that it will be valuable. Apologies in advance if it turns out to be of no value: "
+            + response
+        )
     return response
 
 
-async def response_relevance_filter_for_faculty_evaluation(query: str, response: str) -> str:
-    evaluate_system_prompt = (
-        """You are given a query and a response. Determine if the response is relevant, irrelevant or highly irrelevant to the query. Only respond with "Relevant", "Irrelevant" or "Highly Irrelevant"."""
-    )
-    evaluate_user_prompt = (
-        f"""
+async def response_relevance_filter_for_faculty_evaluation(
+    query: str, response: str
+) -> str:
+    evaluate_system_prompt = """You are given a query and a response. Determine if the response is relevant, irrelevant or highly irrelevant to the query. Only respond with "Relevant", "Irrelevant" or "Highly Irrelevant"."""
+    evaluate_user_prompt = f"""
         Query: {query}
 
         Content: {response}
         """
-    )
     request = QueryRequest(query=query)
-    is_response_relevant = await generate_response(request, response, evaluate_system_prompt, evaluate_user_prompt)
+    is_response_relevant = await generate_response(
+        request, response, evaluate_system_prompt, evaluate_user_prompt
+    )
     print("RELEVANCE OUTCOME")
     print(is_response_relevant)
-    if is_response_relevant.lower() == 'highly irrelevant':
-        return "Given that the answer that I am able to retrieve with the information I have seems to be highly irrelevant to the query, I abstain from providing a response. I am sorry for not being helpful." # Returns an empty coroutine
-    elif is_response_relevant.lower() == 'irrelevant':
-        return "The answer I am able to retrieve with the information I have seems to be irrelevant to the query. Nevertheless, I will provide you with the response in the hope that it will be valuable. Apologies in advance if it turns out to be of no value: " + response
+    if is_response_relevant.lower() == "highly irrelevant":
+        return "Given that the answer that I am able to retrieve with the information I have seems to be highly irrelevant to the query, I abstain from providing a response. I am sorry for not being helpful."  # Returns an empty coroutine
+    elif is_response_relevant.lower() == "irrelevant":
+        return (
+            "The answer I am able to retrieve with the information I have seems to be irrelevant to the query. Nevertheless, I will provide you with the response in the hope that it will be valuable. Apologies in advance if it turns out to be of no value: "
+            + response
+        )
     return response
 
 
-async def response_relevance_filter_for_grading_assistant(question: str, answer: str, evaluation: str) -> str:
-    evaluate_the_evaluation_for_aga_with_ground_truth_system_prompt = (
-        """You are given a question, answer and evaluation for that answer. Determine if the evalution is "correct" or "incorrect"."""
-    )
-    evaluate_the_evaluation_for_aga_with_ground_truth_user_prompt = (
-        f"""
+async def response_relevance_filter_for_grading_assistant(
+    question: str, answer: str, evaluation: str
+) -> str:
+    evaluate_the_evaluation_for_aga_with_ground_truth_system_prompt = """You are given a question, answer and evaluation for that answer. Determine if the evalution is "correct" or "incorrect"."""
+    evaluate_the_evaluation_for_aga_with_ground_truth_user_prompt = f"""
     Question: {question}
 
     Answer: {answer}
@@ -2658,20 +2926,23 @@ async def response_relevance_filter_for_grading_assistant(question: str, answer:
 
     You are given a question, answer and evaluation for that answer. Determine if the evalution is "correct" or "incorrect". Answer only with "CORRECT" or "INCORRECT".
         """
-    )
     request = QueryRequest(query=answer)
-    is_response_relevant = await generate_response(request, evaluation, evaluate_the_evaluation_for_aga_with_ground_truth_system_prompt, evaluate_the_evaluation_for_aga_with_ground_truth_user_prompt)
+    is_response_relevant = await generate_response(
+        request,
+        evaluation,
+        evaluate_the_evaluation_for_aga_with_ground_truth_system_prompt,
+        evaluate_the_evaluation_for_aga_with_ground_truth_user_prompt,
+    )
     print("RELEVANCE OUTCOME")
     print(is_response_relevant)
-    if is_response_relevant.lower() == 'correct':
+    if is_response_relevant.lower() == "correct":
         return evaluation
     return "Due to lack of expertise, the system can not grade the answer."
-    
+
 
 ##################################################################################################################################################################
 #################################################################################################################################################################
 #################################################################################################################################################################
-
 
 
 # @app.post("/api/ollamaAFE")
@@ -2685,7 +2956,7 @@ async def response_relevance_filter_for_grading_assistant(question: str, answer:
 #         sub_dimensions = dimension_data["sub-dimensions"]
 #         total_sub_weight = sum([sub_data["weight"] for sub_data in sub_dimensions.values()])
 #         weighted_sub_scores = 0
-        
+
 #         all_responses[dimension] = {}
 
 #         for sub_dim_name, sub_dim_data in sub_dimensions.items():
@@ -2719,7 +2990,6 @@ async def response_relevance_filter_for_grading_assistant(question: str, answer:
 #     }
 
 
-
 # REFACTOR
 @app.post("/api/ollamaAFE")
 async def ollama_afe(request: QueryRequest):
@@ -2730,9 +3000,11 @@ async def ollama_afe(request: QueryRequest):
 
     for dimension, dimension_data in dimensions.items():
         sub_dimensions = dimension_data["sub-dimensions"]
-        total_sub_weight = sum([sub_data["weight"] for sub_data in sub_dimensions.values()])
+        total_sub_weight = sum(
+            [sub_data["weight"] for sub_data in sub_dimensions.values()]
+        )
         weighted_sub_scores = 0
-        
+
         all_responses[dimension] = {}
 
         for sub_dim_name, sub_dim_data in sub_dimensions.items():
@@ -2749,13 +3021,14 @@ async def ollama_afe(request: QueryRequest):
             context = await make_request(query)
             print(context)
             if context is None:
-                raise HTTPException(status_code=500, detail="Failed to fetch context")
-            
+                raise HTTPException(
+                    status_code=500, detail="Failed to fetch context"
+                )
+
             # filtered_context_afe = await context_relevance_filter(query, context)
 
             # Example custom prompts
-            afe_system_prompt = (
-                f"""
+            afe_system_prompt = f"""
                 ### Instructions
 
                 Evaluate the teacher's performance based on the criterion: **{sub_dim_name}** - {sub_dim_data}.
@@ -2772,17 +3045,16 @@ async def ollama_afe(request: QueryRequest):
                 - If the transcript does not provide enough information to assess **{sub_dim_name}**, score as **N/A** and explain why.
                 - Justify any score below 5 with clear reasoning.
                 """
-            )
             # afe_user_prompt = (
             #     f"""
-            #     Here are given transcript snippets for {instructor_name}-   
+            #     Here are given transcript snippets for {instructor_name}-
 
             #         [TRANSCRIPT START]
             #         {filtered_context_afe}
             #         [TRANSCRIPT END]
 
             #     Please provide an evaluation of the teacher named '{instructor_name}' on the following criteria: '{sub_dim_name}'. Only include information from transcripts where '{instructor_name}' is the instructor. If the instructor's name is not present in the transcript, clearly mention that and do not evaluate.
-                
+
             #     #### Output Format
 
             #     - **{sub_dim_name}:** score_obtained: score (1-5 or N/A) - Note: No special formatting should be used here.
@@ -2793,15 +3065,14 @@ async def ollama_afe(request: QueryRequest):
             #     - Example 3: "[Quoted text from transcript]" [Description] [Timestamp]
             #     - ...
 
-            #     - Provide both positive and negative examples. 
+            #     - Provide both positive and negative examples.
             #     - Highlight poor examples if the score is below 5.
             #     - Consider the context of statements as context is crucial.
 
             #     Rate strictly on a scale of 1 to 5, using whole numbers only. Ensure examples are directly relevant to the evaluation criterion.
             #     """
             # )
-            afe_user_prompt = (
-                f"""
+            afe_user_prompt = f"""
                 Here are given transcript snippets for {instructor_name}-   
 
                     [TRANSCRIPT START]
@@ -2829,43 +3100,56 @@ async def ollama_afe(request: QueryRequest):
                 -The score for {sub_dim_name} must be in the format:
                     spanda_{sub_dim_name}: followed by the score.
                 """
-            )
             # Generate the response using the utility function
-            full_text = await generate_response(request, context, afe_system_prompt, afe_user_prompt)
+            full_text = await generate_response(
+                request, context, afe_system_prompt, afe_user_prompt
+            )
 
             # relevance_filtered_response_for_faculty_evaluation = await response_relevance_filter_for_faculty_evaluation(request.query, full_text)
 
             response = full_text
 
-            pattern = rf'(score:\s*([\s\S]*?)(\d+)|\**{sub_dim_name}\**\s*:\s*(\d+))'
+            pattern = (
+                rf"(score:\s*([\s\S]*?)(\d+)|\**{sub_dim_name}\**\s*:\s*(\d+))"
+            )
             match = re.search(pattern, response, re.IGNORECASE)
             if match:
                 # Check which group matched and extract the score
                 if match.group(3):  # This means 'Score:' pattern matched
-                    score_value = match.group(3).strip()  # group(3) contains the number after 'Score:'
-                elif match.group(4):  # This means direct number pattern matched
-                    score_value = match.group(4).strip()  # group(4) contains the number directly after score criterion
+                    score_value = match.group(
+                        3
+                    ).strip()  # group(3) contains the number after 'Score:'
+                elif match.group(
+                    4
+                ):  # This means direct number pattern matched
+                    score_value = match.group(
+                        4
+                    ).strip()  # group(4) contains the number directly after score criterion
                 else:
-                    score_value = "N/A"  # Fallback in case groups are not as expected
+                    score_value = (
+                        "N/A"  # Fallback in case groups are not as expected
+                    )
                 scores_dict[sub_dim_name] = score_value
             else:
                 scores_dict[sub_dim_name] = "N/A"
 
             # Store the response and score
-            all_responses[dimension][sub_dim_name] = f"{sub_dim_name}: {scores_dict.get(sub_dim_name, 'N/A')} - Detailed Explanation with Examples and justification for examples.\n\n{response}"
+            all_responses[dimension][
+                sub_dim_name
+            ] = f"{sub_dim_name}: {scores_dict.get(sub_dim_name, 'N/A')} - Detailed Explanation with Examples and justification for examples.\n\n{response}"
             score_str = scores_dict.get(sub_dim_name, "0")
             score = int(score_str) if score_str.isdigit() else 0
             normalized_score = (score / 5) * sub_dim_data["weight"]
             weighted_sub_scores += normalized_score
 
         # Calculate the weighted average for this dimension
-        dimension_score = (weighted_sub_scores / total_sub_weight) * dimension_data["weight"]
+        dimension_score = (
+            weighted_sub_scores / total_sub_weight
+        ) * dimension_data["weight"]
         scores_dict[dimension] = dimension_score
 
-    return {
-        "dimension_scores": scores_dict,
-        "DOCUMENT": all_responses
-    }
+    return {"dimension_scores": scores_dict, "DOCUMENT": all_responses}
+
 
 # # Modified import endpoint to handle transcript uploads
 # @app.post("/api/importTranscript")
@@ -2896,13 +3180,16 @@ async def upload_transcript(payload: ImportPayload):
             file_content = base64.b64decode(file_data.content)
             with open(file_data.filename, "wb") as file:
                 file.write(file_content)
-        
+
         logging = []
 
         print(f"Received payload: {payload}")
         if production:
             logging.append(
-                {"type": "ERROR", "message": "Can't import when in production mode"}
+                {
+                    "type": "ERROR",
+                    "message": "Can't import when in production mode",
+                }
             )
             return JSONResponse(
                 content={
@@ -2930,11 +3217,13 @@ async def upload_transcript(payload: ImportPayload):
                 }
             )
 
-
     except Exception as e:
         print(f"Error during import: {e}")
-        raise HTTPException(status_code=500, detail="Error processing the file")
-    
+        raise HTTPException(
+            status_code=500, detail="Error processing the file"
+        )
+
+
 @app.post("/api/evaluate_Transcipt")
 async def evaluate_Transcipt(request: QueryRequest):
     # dimensions = {
@@ -2969,22 +3258,22 @@ async def evaluate_Transcipt(request: QueryRequest):
     #                 "Example: Always greets students warmly, frequently provides positive feedback and encouragement.",
     # }
     dimensions = {
-        "Mastery of the Subject":{
-                "Knowledge of Content and Pedagogy": "A deep understanding of their subject matter and the best practices for teaching it. Example - In a mathematics course on real analysis, the professor demonstrates best practices by Guiding students through the process of constructing formal proofs step-by-step, highlighting common pitfalls and techniques for overcoming them.",
-                "Breadth of Coverage": "Awareness of different possible perspectives related to the topic taught. Example - Teacher discusses different theoretical views, current and prior scientific developments, etc.",
-                "Knowledge of Resources": "Awareness of and utilization of a variety of current resources in the subject area to enhance instruction. Example - The teacher cites recent research studies or books while explaining relevant concepts."
+        "Mastery of the Subject": {
+            "Knowledge of Content and Pedagogy": "A deep understanding of their subject matter and the best practices for teaching it. Example - In a mathematics course on real analysis, the professor demonstrates best practices by Guiding students through the process of constructing formal proofs step-by-step, highlighting common pitfalls and techniques for overcoming them.",
+            "Breadth of Coverage": "Awareness of different possible perspectives related to the topic taught. Example - Teacher discusses different theoretical views, current and prior scientific developments, etc.",
+            "Knowledge of Resources": "Awareness of and utilization of a variety of current resources in the subject area to enhance instruction. Example - The teacher cites recent research studies or books while explaining relevant concepts.",
         },
-        "Expository Quality":{
-                "Content Clarity": "Extent to which the teacher is able to explain the content to promote clarity and ease of understanding. Example - Teacher uses simple vocabulary and concise sentences to explain complex concepts.",
-                "Communication Clarity": "The ability of the teacher to effectively convey information and instructions to students in a clear and understandable manner. Example - The teacher’s voice and language is clear with the use of appropriate voice modulation, tone, and pitch to facilitate ease of understanding."
+        "Expository Quality": {
+            "Content Clarity": "Extent to which the teacher is able to explain the content to promote clarity and ease of understanding. Example - Teacher uses simple vocabulary and concise sentences to explain complex concepts.",
+            "Communication Clarity": "The ability of the teacher to effectively convey information and instructions to students in a clear and understandable manner. Example - The teacher’s voice and language is clear with the use of appropriate voice modulation, tone, and pitch to facilitate ease of understanding.",
         },
-        "Structuring of Objectives and Content":{
-                "Organization": "The extent to which content is presented in a structured and comprehensive manner with emphasis on important content and proper linking content. Example - Teacher starts the class by providing an outline of what all will be covered in that particular class and connects it to previous knowledge of learners.",
-                "Clarity of Instructional Objectives": "The clarity and specificity of the learning objectives communicated to students, guiding the focus and direction of instruction. Example - At the start of the lesson, the teacher displays the learning objectives and takes a few moments to explain them to the students."
+        "Structuring of Objectives and Content": {
+            "Organization": "The extent to which content is presented in a structured and comprehensive manner with emphasis on important content and proper linking content. Example - Teacher starts the class by providing an outline of what all will be covered in that particular class and connects it to previous knowledge of learners.",
+            "Clarity of Instructional Objectives": "The clarity and specificity of the learning objectives communicated to students, guiding the focus and direction of instruction. Example - At the start of the lesson, the teacher displays the learning objectives and takes a few moments to explain them to the students.",
         },
-        "Qualities of Interaction":{
-                "Instructor Enthusiasm And Positive demeanor": "Extent to which a teacher is enthusiastic and committed to making the course interesting, active, dynamic, humorous, etc. Example - Teacher uses an interesting fact or joke to engage the class."
-        }
+        "Qualities of Interaction": {
+            "Instructor Enthusiasm And Positive demeanor": "Extent to which a teacher is enthusiastic and committed to making the course interesting, active, dynamic, humorous, etc. Example - Teacher uses an interesting fact or joke to engage the class."
+        },
     }
 
     transcript = request.query
@@ -3011,40 +3300,51 @@ async def evaluate_Transcipt(request: QueryRequest):
         # Iterating through each sub-trait and retrieving context
         count_of_subtrait = 0
         sum_of_all_sub_trait_scores = 0
-        for sub_trait, explanation_of_subtrait in sub_traits_and_explanations.items():
-            query = f"Evaluate the transcript - {transcript} based on {sub_trait}."
+        for (
+            sub_trait,
+            explanation_of_subtrait,
+        ) in sub_traits_and_explanations.items():
+            query = (
+                f"Evaluate the transcript - {transcript} based on {sub_trait}."
+            )
             # retrieving context
             context = ""
             # context = await make_request(query)  # Assuming make_request is defined elsewhere
             # retrieving feedback and computing score for the sub-dimension
-            result_response, result_score = await instructor_eval(query, context, sub_trait, explanation_of_subtrait)
+            result_response, result_score = await instructor_eval(
+                query, context, sub_trait, explanation_of_subtrait
+            )
             sum_of_all_sub_trait_scores += int(result_score)
             count_of_subtrait += 1
 
-        master_scores_dict[dimension] = sum_of_all_sub_trait_scores/count_of_subtrait
+        master_scores_dict[dimension] = (
+            sum_of_all_sub_trait_scores / count_of_subtrait
+        )
 
-
-            
         # # Log the raw outputs for debugging
         # print(f"Dimension: {dimension}")
         # print(f"Raw Result Responses: {result_responses}")
         # print(f"Raw Result Scores: {result_scores}")
 
         # Safely access and store the responses and scores
-        all_responses[dimension] = result_response.get('content', "No response available")
+        all_responses[dimension] = result_response.get(
+            "content", "No response available"
+        )
         # all_score[dimension] = result_score.get(dimension, "No score available")
-    
+
     # print("Final Responses:", all_responses)
     # print("Final Scores:", all_scores)
-    
-    response = {
-        "DOCUMENT": all_responses,
-        "SCORES": master_scores_dict
-    }
+
+    response = {"DOCUMENT": all_responses, "SCORES": master_scores_dict}
 
     return response
 
-async def resume_eval(afe_resume_analysis_system_message, afe_resume_analysis_user_prompt, score_criterion):
+
+async def resume_eval(
+    afe_resume_analysis_system_message,
+    afe_resume_analysis_user_prompt,
+    score_criterion,
+):
     # user_context = "".join(context)
     responses = {}
     scores_dict = {}
@@ -3098,34 +3398,32 @@ async def resume_eval(afe_resume_analysis_system_message, afe_resume_analysis_us
 
     # user_prompt = f"""Please provide an evaluation of the resume named '{resume_name}' in comparison to the job description named '{jd_name}' on the following criteria: '{score_criterion}'. Only include information from the provided documents."""
 
-    resume_system_prompt = (
-        f"""
+    resume_system_prompt = f"""
         {afe_resume_analysis_system_message}
         """
-    )
-    resume_user_prompt = (
-        f"""
+    resume_user_prompt = f"""
         {afe_resume_analysis_user_prompt}
         
         Strictly follow the output format-
           -{score_criterion}: Score: score(range of 0 to 3, or N/A)
         """
-    )
     # Create a QueryRequest object
-    query_request = QueryRequest(query=f"Judge the Resume based on the Job Description.")
+    query_request = QueryRequest(
+        query=f"Judge the Resume based on the Job Description."
+    )
     context = ""
     # Properly calling generate_response with all required arguments
     full_text = await generate_response(
         query_request,  # Pass the QueryRequest object
-        context, 
-        resume_system_prompt, 
-        resume_user_prompt
+        context,
+        resume_system_prompt,
+        resume_user_prompt,
     )
-    
+
     responses[score_criterion] = full_text
 
     # Extract score using regex
-    pattern = rf'(score:\s*(\d+)|\**{score_criterion}\**\s*:\s*(\d+))'
+    pattern = rf"(score:\s*(\d+)|\**{score_criterion}\**\s*:\s*(\d+))"
     match = re.search(pattern, full_text, re.IGNORECASE)
 
     if match:
@@ -3136,13 +3434,14 @@ async def resume_eval(afe_resume_analysis_system_message, afe_resume_analysis_us
 
     return responses, scores_dict
 
+
 # Define the extract_score function
 def extract_score(response_content):
     # Regular expression to find the score in the response
-    score_match = re.search(r'Score:\s*(\d+|N/A)', response_content)
+    score_match = re.search(r"Score:\s*(\d+|N/A)", response_content)
     if score_match:
         score = score_match.group(1)
-        if score == 'N/A':
+        if score == "N/A":
             return score
         return int(score)
     return None
@@ -3154,53 +3453,53 @@ async def evaluate_Resume(request: QueryRequestResume):
     print(request.resume)
     print("JD")
     print(request.jd)
-    
+
     dimensions = {
         "Qualification Match": "The extent to which the candidate's educational background, certifications, and experience align with the specific requirements outlined in the job description.\n"
-            "0: Qualifications are largely unrelated to the position.\n"
-            "Example: The job requires a Master's degree in Computer Science, but the candidate has a Bachelor's in History.\n"
-            "1: Some relevant qualifications but significant gaps exist.\n"
-            "Example: The candidate has a Bachelor's in Computer Science but lacks the required 3 years of industry experience.\n"
-            "2: Mostly meets the qualifications with minor gaps.\n"
-            "Example: The candidate meets most qualifications but lacks experience with a specific programming language mentioned in the job description.\n"
-            "3: Exceeds qualifications, demonstrating additional relevant skills or experience.\n"
-            "Example: The candidate exceeds the required experience and has additional certifications in relevant areas.",
+        "0: Qualifications are largely unrelated to the position.\n"
+        "Example: The job requires a Master's degree in Computer Science, but the candidate has a Bachelor's in History.\n"
+        "1: Some relevant qualifications but significant gaps exist.\n"
+        "Example: The candidate has a Bachelor's in Computer Science but lacks the required 3 years of industry experience.\n"
+        "2: Mostly meets the qualifications with minor gaps.\n"
+        "Example: The candidate meets most qualifications but lacks experience with a specific programming language mentioned in the job description.\n"
+        "3: Exceeds qualifications, demonstrating additional relevant skills or experience.\n"
+        "Example: The candidate exceeds the required experience and has additional certifications in relevant areas.",
         "Experience Relevance": "The degree to which the candidate's prior teaching, research, or industry experience is relevant to the courses they would be teaching.\n"
-            "0: Little to no relevant experience in the subject matter.\n"
-            "Example: The candidate has no prior experience teaching or working with the programming languages listed in the course syllabus.\n"
-            "1: Some relevant experience but mostly in unrelated areas.\n"
-            "Example: The candidate has experience in web development but the course focuses on mobile app development.\n"
-            "2: Solid experience in related fields but limited direct experience in the specific subject.\n"
-            "Example: The candidate has taught general computer science courses but not the specific advanced algorithms course they are applying for.\n"
-            "3: Extensive experience directly teaching or working in the subject area.\n"
-            "Example: The candidate has 5+ years of experience teaching the specific course they are applying for and has published research in the field.",
+        "0: Little to no relevant experience in the subject matter.\n"
+        "Example: The candidate has no prior experience teaching or working with the programming languages listed in the course syllabus.\n"
+        "1: Some relevant experience but mostly in unrelated areas.\n"
+        "Example: The candidate has experience in web development but the course focuses on mobile app development.\n"
+        "2: Solid experience in related fields but limited direct experience in the specific subject.\n"
+        "Example: The candidate has taught general computer science courses but not the specific advanced algorithms course they are applying for.\n"
+        "3: Extensive experience directly teaching or working in the subject area.\n"
+        "Example: The candidate has 5+ years of experience teaching the specific course they are applying for and has published research in the field.",
         "Skillset Alignment": "How well the candidate's demonstrated skills (e.g., technical skills, communication, leadership) match the required competencies for the role.\n"
-            "0: Skills are largely misaligned with the job requirements.\n"
-            "Example: The job requires strong communication and presentation skills, but the candidate has no experience presenting or leading workshops.\n"
-            "1: Possesses some required skills but lacks others.\n"
-            "Example: The candidate has strong technical skills but lacks experience with collaborative project management tools.\n"
-            "2: Demonstrates most of the required skills with some room for improvement.\n"
-            "Example: The candidate has good communication skills but could benefit from additional training in public speaking.\n"
-            "3: Possesses all required skills and demonstrates advanced abilities in some areas.\n"
-            "Example: The candidate has excellent technical skills, is a highly effective communicator, and has a proven track record of mentoring junior developers.",
+        "0: Skills are largely misaligned with the job requirements.\n"
+        "Example: The job requires strong communication and presentation skills, but the candidate has no experience presenting or leading workshops.\n"
+        "1: Possesses some required skills but lacks others.\n"
+        "Example: The candidate has strong technical skills but lacks experience with collaborative project management tools.\n"
+        "2: Demonstrates most of the required skills with some room for improvement.\n"
+        "Example: The candidate has good communication skills but could benefit from additional training in public speaking.\n"
+        "3: Possesses all required skills and demonstrates advanced abilities in some areas.\n"
+        "Example: The candidate has excellent technical skills, is a highly effective communicator, and has a proven track record of mentoring junior developers.",
         "Potential Impact": "An assessment of the candidate's potential to contribute positively to the department and the institution as a whole, based on their resume and cover letter.\n"
-            "0: Unclear or negative potential impact based on application materials.\n"
-            "Example: The candidate's application materials are vague and do not highlight any specific contributions they could make.\n"
-            "1: Potential for minimal impact or contribution.\n"
-            "Example: The candidate's resume shows basic qualifications but no indication of going above and beyond.\n"
-            "2: Demonstrates potential for moderate positive impact.\n"
-            "Example: The candidate has experience with relevant projects and expresses enthusiasm for contributing to the department's research initiatives.\n"
-            "3: Shows strong potential to significantly impact the department and institution through teaching, research, or other activities.\n"
-            "Example: The candidate has a strong publication record, outstanding references, and a clear vision for how they would enhance the curriculum.",
+        "0: Unclear or negative potential impact based on application materials.\n"
+        "Example: The candidate's application materials are vague and do not highlight any specific contributions they could make.\n"
+        "1: Potential for minimal impact or contribution.\n"
+        "Example: The candidate's resume shows basic qualifications but no indication of going above and beyond.\n"
+        "2: Demonstrates potential for moderate positive impact.\n"
+        "Example: The candidate has experience with relevant projects and expresses enthusiasm for contributing to the department's research initiatives.\n"
+        "3: Shows strong potential to significantly impact the department and institution through teaching, research, or other activities.\n"
+        "Example: The candidate has a strong publication record, outstanding references, and a clear vision for how they would enhance the curriculum.",
         "Overall Fit": "A holistic assessment of how well the candidate aligns with the department's culture, values, and long-term goals.\n"
-            "0: Poor overall fit with the department.\n"
-            "Example: The candidate's values and goals conflict with the department's focus on collaborative learning.\n"
-            "1: Some alignment but significant differences in values or goals.\n"
-            "Example: The candidate is passionate about research but the department prioritizes teaching excellence.\n"
-            "2: Good fit with some areas of potential misalignment.\n"
-            "Example: The candidate aligns well with most of the department's values but has a different teaching style than is typical for the institution.\n"
-            "3: Excellent fit with the department's culture, values, and goals.\n"
-            "Example: The candidate's teaching philosophy, research interests, and collaborative spirit perfectly complement the department's existing strengths and future aspirations."
+        "0: Poor overall fit with the department.\n"
+        "Example: The candidate's values and goals conflict with the department's focus on collaborative learning.\n"
+        "1: Some alignment but significant differences in values or goals.\n"
+        "Example: The candidate is passionate about research but the department prioritizes teaching excellence.\n"
+        "2: Good fit with some areas of potential misalignment.\n"
+        "Example: The candidate aligns well with most of the department's values but has a different teaching style than is typical for the institution.\n"
+        "3: Excellent fit with the department's culture, values, and goals.\n"
+        "Example: The candidate's teaching philosophy, research interests, and collaborative spirit perfectly complement the department's existing strengths and future aspirations.",
     }
 
     all_responses = {}
@@ -3221,20 +3520,21 @@ async def evaluate_Resume(request: QueryRequestResume):
         Examples for the dimension - {explanation}
         Compare the given Job Description and resume based on {dimension}. 
          """
-        
+
         afe_resume_analysis_system_message = """As an expert in resume and job description analysis, your task is to conduct a thorough evaluation of the provided resume against the job description. The goal is to determine the alignment between the candidate's qualifications, experience, and skills with the requirements and expectations outlined in the job description."""
 
         # context = await make_request(query)  # Assuming make_request is defined elsewhere to get the context
 
-        result_responses, result_scores = await resume_eval(afe_resume_analysis_system_message, afe_resume_analysis_user_prompt, dimension)
-        
+        result_responses, result_scores = await resume_eval(
+            afe_resume_analysis_system_message,
+            afe_resume_analysis_user_prompt,
+            dimension,
+        )
+
         # Assuming result_responses is a string or dict containing the relevant message
         all_responses[dimension] = result_responses
         all_scores[dimension] = result_scores
-    
-    response = {
-        "DOCUMENT": all_responses,
-        "SCORES": all_scores
-    }
-    
+
+    response = {"DOCUMENT": all_responses, "SCORES": all_scores}
+
     return response

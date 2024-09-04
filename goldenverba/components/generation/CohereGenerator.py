@@ -39,39 +39,46 @@ class CohereGenerator(Generator):
                 "finish_reason": "stop",
             }
 
-        
-
         if conversation is None:
             conversation = {}
-        message, _conversation = self.prepare_messages(queries, context, conversation)
+        message, _conversation = self.prepare_messages(
+            queries, context, conversation
+        )
 
         data = {
             "model": self.model,
             "chat_history": _conversation,  # Assuming this structure from your context
             "message": message,
-            "stream": True
+            "stream": True,
         }
 
         headers = {
-            'Authorization': f'Bearer {os.getenv("COHERE_API_KEY")}',
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
+            "Authorization": f'Bearer {os.getenv("COHERE_API_KEY")}',
+            "Content-Type": "application/json",
+            "Accept": "application/json",
         }
 
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.post(self.url, json=data, headers=headers) as response:
+                async with session.post(
+                    self.url, json=data, headers=headers
+                ) as response:
                     if response.status == 200:
-                            async for line in response.content:
-                                if line.strip():
-                                    json_data = json.loads(line.decode('utf-8'))
-                                    message = json_data.get("text", "")
-                                    finish_reason = "stop" if json_data.get("finish_reason", "") == "COMPLETE" else ""
+                        async for line in response.content:
+                            if line.strip():
+                                json_data = json.loads(line.decode("utf-8"))
+                                message = json_data.get("text", "")
+                                finish_reason = (
+                                    "stop"
+                                    if json_data.get("finish_reason", "")
+                                    == "COMPLETE"
+                                    else ""
+                                )
 
-                                    yield {
-                                        "message": message,
-                                        "finish_reason": finish_reason,
-                                    }
+                                yield {
+                                    "message": message,
+                                    "finish_reason": finish_reason,
+                                }
                     else:
                         error_message = await response.text()
                         yield {
@@ -87,7 +94,10 @@ class CohereGenerator(Generator):
             raise
 
     def prepare_messages(
-        self, queries: list[str], context: list[str], conversation: dict[str, str]
+        self,
+        queries: list[str],
+        context: list[str],
+        conversation: dict[str, str],
     ) -> dict[str, str]:
         """
         Prepares a list of messages formatted for a Retrieval Augmented Generation chatbot system, including system instructions, previous conversation, and a new user query with context.
