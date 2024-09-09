@@ -54,7 +54,7 @@ setup(
         "huggingface": [
             "sentence-transformers==2.7.0",
             "transformers==4.40.1",
-            "torch==2.3.0",
+            "torch==2.2.0",
             "accelerate==0.29.2",
         ],
         "google": [
