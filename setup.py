@@ -36,7 +36,7 @@ setup(
         "requests==2.31.0",
         "pypdf==4.2.0",
         "ollama",
-        "torch==2.3.0",
+        "torch==2.2.0",
         "sentence-transformers==2.7.0",
         "transformers==4.40.1",
         "accelerate==0.29.2",
